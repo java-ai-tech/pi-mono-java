@@ -1,0 +1,9 @@
+**/target/
+.idea/
+*.iml
+.env
+.env.local
+/docs
+/docs/
+/docs/**
+/.claude/

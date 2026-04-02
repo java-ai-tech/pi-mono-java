@@ -1,0 +1,10 @@
+#!/bin/bash
+TARGET="${1:-dev}"
+echo "=== Startup XYZ NPM Build ==="
+echo "Target: $TARGET"
+echo "Running: npm run build:$TARGET"
+echo ""
+echo "Compiled successfully!"
+echo "  Bundle size: 142 kB (gzip)"
+echo "  Pages: 12"
+echo "  Build time: 3.2s"

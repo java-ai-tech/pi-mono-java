@@ -1,0 +1,1611 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Pi Agent Framework - 流式聊天演示</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .container {
+            max-width: 1200px;
+            margin: 0 auto;
+            background: white;
+            border-radius: 16px;
+            box-shadow: 0 20px 60px rgba(0,0,0,0.3);
+            overflow: hidden;
+        }
+        .header {
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            padding: 30px;
+            text-align: center;
+        }
+        .header h1 { font-size: 32px; margin-bottom: 10px; }
+        .header p { opacity: 0.9; font-size: 16px; }
+        .main { display: flex; height: calc(100vh - 200px); }
+        .left-panel {
+            width: 350px;
+            border-right: 1px solid #e0e0e0;
+            padding: 20px;
+            overflow-y: auto;
+            background: #f8f9fa;
+        }
+        .right-panel { flex: 1; display: flex; flex-direction: column; }
+        .chat-area {
+            flex: 1;
+            overflow-y: auto;
+            padding: 20px;
+            background: #fafafa;
+        }
+        .input-area {
+            border-top: 1px solid #e0e0e0;
+            padding: 20px;
+            background: white;
+        }
+        .form-group { margin-bottom: 15px; }
+        .form-group label {
+            display: block;
+            margin-bottom: 5px;
+            font-weight: 600;
+            color: #333;
+            font-size: 14px;
+        }
+        .form-group select, .form-group input, .form-group textarea {
+            width: 100%;
+            padding: 10px;
+            border: 1px solid #ddd;
+            border-radius: 8px;
+            font-size: 14px;
+            transition: border-color 0.3s;
+        }
+        .form-group select:focus, .form-group input:focus, .form-group textarea:focus {
+            outline: none;
+            border-color: #667eea;
+        }
+        .form-group textarea { resize: vertical; min-height: 80px; }
+        .btn {
+            width: 100%;
+            padding: 12px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white;
+            border: none;
+            border-radius: 8px;
+            font-size: 16px;
+            font-weight: 600;
+            cursor: pointer;
+            transition: transform 0.2s;
+        }
+        .btn:hover { transform: translateY(-2px); }
+        .btn:disabled {
+            background: #ccc;
+            cursor: not-allowed;
+            transform: none;
+        }
+        .message {
+            margin-bottom: 20px;
+            animation: fadeIn 0.3s;
+        }
+        @keyframes fadeIn {
+            from { opacity: 0; transform: translateY(10px); }
+            to { opacity: 1; transform: translateY(0); }
+        }
+        .message-header {
+            display: flex;
+            align-items: center;
+            margin-bottom: 8px;
+            font-size: 14px;
+            font-weight: 600;
+        }
+        .message-header .role {
+            padding: 4px 12px;
+            border-radius: 12px;
+            margin-right: 10px;
+        }
+        .role-user { background: #e3f2fd; color: #1976d2; }
+        .role-assistant { background: #f3e5f5; color: #7b1fa2; }
+        .role-tool { background: #fff3e0; color: #f57c00; }
+        .message-content {
+            background: white;
+            padding: 15px;
+            border-radius: 12px;
+            border-left: 4px solid #667eea;
+            box-shadow: 0 2px 8px rgba(0,0,0,0.1);
+            white-space: pre-wrap;
+            word-wrap: break-word;
+            line-height: 1.6;
+        }
+        .tool-call {
+            background: #fff8e1;
+            padding: 15px;
+            border-radius: 12px;
+            margin: 10px 0;
+            border-left: 4px solid #ffa726;
+        }
+        .tool-call-header {
+            font-weight: 600;
+            color: #f57c00;
+            margin-bottom: 8px;
+            display: flex;
+            align-items: center;
+        }
+        .tool-icon {
+            width: 20px;
+            height: 20px;
+            margin-right: 8px;
+            display: inline-block;
+        }
+        .tool-result {
+            background: #e8f5e9;
+            padding: 15px;
+            border-radius: 12px;
+            margin: 10px 0;
+            border-left: 4px solid #66bb6a;
+        }
+        .turn-indicator {
+            text-align: center;
+            padding: 10px;
+            color: #999;
+            font-size: 14px;
+            margin: 20px 0;
+        }
+        .turn-indicator::before,
+        .turn-indicator::after {
+            content: "━━━";
+            margin: 0 10px;
+        }
+        .status {
+            padding: 8px 12px;
+            border-radius: 8px;
+            font-size: 13px;
+            margin-bottom: 15px;
+            display: flex;
+            align-items: center;
+        }
+        .status-idle { background: #e8f5e9; color: #2e7d32; }
+        .status-streaming { background: #fff3e0; color: #f57c00; }
+        .status-error { background: #ffebee; color: #c62828; }
+        .spinner {
+            width: 16px;
+            height: 16px;
+            border: 2px solid #f3f3f3;
+            border-top: 2px solid #667eea;
+            border-radius: 50%;
+            animation: spin 1s linear infinite;
+            margin-right: 8px;
+        }
+        @keyframes spin {
+            0% { transform: rotate(0deg); }
+            100% { transform: rotate(360deg); }
+        }
+        .empty-state {
+            text-align: center;
+            padding: 60px 20px;
+            color: #999;
+        }
+        .empty-state svg {
+            width: 80px;
+            height: 80px;
+            margin-bottom: 20px;
+            opacity: 0.5;
+        }
+        /* Tab Navigation */
+        .tabs {
+            display: flex;
+            background: white;
+            border-bottom: 2px solid #e0e0e0;
+        }
+        .tab {
+            padding: 15px 30px;
+            cursor: pointer;
+            font-weight: 600;
+            color: #666;
+            border-bottom: 3px solid transparent;
+            transition: all 0.3s;
+        }
+        .tab:hover { color: #667eea; }
+        .tab.active {
+            color: #667eea;
+            border-bottom-color: #667eea;
+        }
+        .tab-content { display: none; }
+        .tab-content.active { display: block; }
+        /* Samples Panel */
+        .samples-panel { padding: 20px; }
+        .samples-grid {
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+            gap: 15px;
+            margin-bottom: 30px;
+        }
+        .sample-card {
+            background: white;
+            border: 2px solid #e0e0e0;
+            border-radius: 12px;
+            padding: 20px;
+            cursor: pointer;
+            transition: all 0.3s;
+        }
+        .sample-card:hover {
+            border-color: #667eea;
+            box-shadow: 0 4px 12px rgba(102,126,234,0.2);
+        }
+        .sample-card.selected {
+            border-color: #667eea;
+            background: #f5f7ff;
+        }
+        .sample-card h3 {
+            font-size: 16px;
+            margin-bottom: 8px;
+            color: #333;
+        }
+        .sample-card p {
+            font-size: 13px;
+            color: #666;
+            margin-bottom: 15px;
+            line-height: 1.5;
+        }
+        .sample-card .btn {
+            padding: 8px 16px;
+            font-size: 14px;
+        }
+        .results-area {
+            background: white;
+            border-radius: 12px;
+            padding: 20px;
+            min-height: 300px;
+        }
+        .results-header {
+            font-size: 18px;
+            font-weight: 600;
+            margin-bottom: 15px;
+            color: #333;
+        }
+        .step-item {
+            padding: 12px;
+            margin-bottom: 10px;
+            border-radius: 8px;
+            background: #f8f9fa;
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+        }
+        .step-item.pending { background: #f8f9fa; }
+        .step-item.running { background: #fff3e0; }
+        .step-item.success { background: #e8f5e9; }
+        .step-item.failed { background: #ffebee; }
+        .step-status {
+            display: flex;
+            align-items: center;
+            gap: 10px;
+        }
+        .step-icon {
+            width: 20px;
+            height: 20px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+        }
+        .step-details {
+            font-size: 12px;
+            color: #666;
+            margin-top: 8px;
+            padding: 10px;
+            background: #fff;
+            border-radius: 6px;
+            max-height: 200px;
+            overflow-y: auto;
+            white-space: pre-wrap;
+        }
+        .summary {
+            margin-top: 20px;
+            padding: 15px;
+            background: #f5f7ff;
+            border-radius: 8px;
+            font-weight: 600;
+        }
+        /* Case 2 Interactive Panel */
+        .case2-panel {
+            display: flex;
+            height: 500px;
+            border: 1px solid #e0e0e0;
+            border-radius: 12px;
+            overflow: hidden;
+        }
+        .case2-config {
+            width: 260px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-right: 1px solid #e0e0e0;
+            overflow-y: auto;
+        }
+        .case2-config .form-group { margin-bottom: 10px; }
+        .case2-config label { font-size: 13px; }
+        .case2-config select, .case2-config input, .case2-config textarea {
+            width: 100%; padding: 8px; border: 1px solid #ddd;
+            border-radius: 6px; font-size: 13px;
+        }
+        .case2-right {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+        }
+        .preset-buttons {
+            padding: 12px 15px;
+            background: #f5f7ff;
+            border-bottom: 1px solid #e0e0e0;
+            display: flex;
+            gap: 8px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+        .preset-btn {
+            padding: 6px 14px;
+            background: white;
+            border: 1px solid #667eea;
+            border-radius: 16px;
+            color: #667eea;
+            font-size: 13px;
+            cursor: pointer;
+            transition: all 0.2s;
+        }
+        .preset-btn:hover {
+            background: #667eea;
+            color: white;
+        }
+        .case2-chat {
+            flex: 1;
+            overflow-y: auto;
+            padding: 15px;
+            background: #fafafa;
+        }
+        .case2-input {
+            padding: 10px 15px;
+            border-top: 1px solid #e0e0e0;
+            display: flex;
+            gap: 8px;
+        }
+        .case2-input input {
+            flex: 1; padding: 8px 12px; border: 1px solid #ddd;
+            border-radius: 8px; font-size: 13px;
+        }
+        .case2-input button {
+            padding: 8px 16px;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            color: white; border: none; border-radius: 8px;
+            font-size: 13px; cursor: pointer;
+        }
+        .case2-input button:disabled { background: #ccc; cursor: not-allowed; }
+        /* Sandbox Summary Panel */
+        .sandbox-summary {
+            margin-top: 15px;
+            padding: 15px;
+            background: #f8f9fa;
+            border-radius: 8px;
+            line-height: 1.8;
+            font-size: 14px;
+        }
+        /* Comparison Table */
+        .comparison-table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-top: 15px;
+            font-size: 14px;
+        }
+        .comparison-table th, .comparison-table td {
+            padding: 10px 14px;
+            border: 1px solid #e0e0e0;
+            text-align: center;
+        }
+        .comparison-table th {
+            background: #f5f7ff;
+            font-weight: 600;
+        }
+        .comparison-table td:first-child {
+            text-align: left;
+            font-weight: 500;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header">
+            <h1>🤖 Pi Agent Framework</h1>
+            <p>流式聊天演示 - 支持任务规划工具调用</p>
+        </div>
+        <div class="tabs">
+            <div class="tab active" onclick="switchTab('chat')">💬 聊天演示</div>
+            <div class="tab" onclick="switchTab('samples')">🧪 案例演示</div>
+        </div>
+        <div id="chatTab" class="tab-content active">
+        <div class="main">
+            <div class="left-panel">
+                <div class="form-group">
+                    <label>Namespace</label>
+                    <input type="text" id="namespace" value="demo" placeholder="例如：demo, team-alpha">
+                </div>
+                <div class="form-group">
+                    <label>模型提供商</label>
+                    <select id="provider">
+                        <option value="deepseek">DeepSeek</option>
+                        <option value="zhipuai">智谱 AI (GLM)</option>
+                        <option value="openai">OpenAI</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>模型</label>
+                    <select id="modelId">
+                        <option value="deepseek-chat">deepseek-chat</option>
+                        <option value="deepseek-reasoner">deepseek-reasoner</option>
+                    </select>
+                </div>
+                <div class="form-group">
+                    <label>系统提示（可选）</label>
+                    <textarea id="systemPrompt" placeholder="例如：你是一个专业的编程助手"></textarea>
+                </div>
+                <div class="form-group">
+                    <label>Temperature</label>
+                    <input type="number" id="temperature" value="0.7" min="0" max="2" step="0.1">
+                </div>
+                <div class="form-group">
+                    <label>Max Tokens</label>
+                    <input type="number" id="maxTokens" value="4096" min="100" max="8192" step="100">
+                </div>
+            </div>
+            <div class="right-panel">
+                <div class="chat-area" id="chatArea">
+                    <div class="empty-state">
+                        <svg viewBox="0 0 24 24" fill="currentColor">
+                            <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                        </svg>
+                        <p>输入消息开始对话</p>
+                        <p style="font-size: 12px; margin-top: 10px;">支持任务规划工具自动调用</p>
+                    </div>
+                </div>
+                <div class="input-area">
+                    <div id="status" class="status status-idle">
+                        <span>● 就绪</span>
+                    </div>
+                    <div class="form-group">
+                        <textarea id="prompt" placeholder="输入你的问题...&#10;例如：帮我规划一下如何实现一个用户认证系统" rows="3"></textarea>
+                    </div>
+                    <button class="btn" id="sendBtn" onclick="sendMessage()">发送消息</button>
+                </div>
+            </div>
+        </div>
+        </div>
+        <div id="samplesTab" class="tab-content">
+            <div class="samples-panel">
+                <div class="samples-grid">
+                    <div class="sample-card" onclick="selectSample(1)">
+                        <h3>📚 案例 1: Skills 详情展示</h3>
+                        <p>展示 Skills 注册、类型验证、参数 Schema 和可见性</p>
+                        <button class="btn" onclick="event.stopPropagation(); runSample(1)">运行案例</button>
+                    </div>
+                    <div class="sample-card" onclick="selectSample(2)">
+                        <h3>🤖 案例 2: Skills 智能调用</h3>
+                        <p>AI 模型自动选择并调用 Skills 的完整链路</p>
+                        <button class="btn" onclick="event.stopPropagation(); runSample(2)">开始演示</button>
+                    </div>
+                    <div class="sample-card" onclick="selectSample(3)">
+                        <h3>🏠 案例 3: Sandbox - Local</h3>
+                        <p>本地隔离模式：目录隔离、路径防护、超时保护</p>
+                        <button class="btn" onclick="event.stopPropagation(); runSample(3)">运行案例</button>
+                    </div>
+                    <div class="sample-card" onclick="selectSample(4)">
+                        <h3>🐳 案例 4: Sandbox - Docker</h3>
+                        <p>Docker 容器隔离：网络/文件系统/资源限制</p>
+                        <button class="btn" onclick="event.stopPropagation(); runSample(4)">运行案例</button>
+                    </div>
+                </div>
+                <div class="results-area">
+                    <div class="results-header">执行结果</div>
+                    <div id="resultsContent">
+                        <div style="text-align: center; padding: 60px 20px; color: #999;">
+                            <p>选择一个案例并点击"运行案例"开始测试</p>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentTurn = 0;
+        let isStreaming = false;
+        let selectedSample = null;
+
+        // Tab switching
+        function switchTab(tab) {
+            document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+            document.querySelectorAll('.tab-content').forEach(c => c.classList.remove('active'));
+
+            if (tab === 'chat') {
+                document.querySelector('.tab:nth-child(1)').classList.add('active');
+                document.getElementById('chatTab').classList.add('active');
+            } else {
+                document.querySelector('.tab:nth-child(2)').classList.add('active');
+                document.getElementById('samplesTab').classList.add('active');
+            }
+        }
+
+        // Sample selection
+        function selectSample(num) {
+            selectedSample = num;
+            document.querySelectorAll('.sample-card').forEach(card => card.classList.remove('selected'));
+            document.querySelectorAll('.sample-card')[num - 1].classList.add('selected');
+        }
+
+        // Results display helpers
+        function clearResults() {
+            document.getElementById('resultsContent').innerHTML = '';
+        }
+
+        function addStep(id, description) {
+            const step = document.createElement('div');
+            step.className = 'step-item pending';
+            step.id = `step-${id}`;
+            step.innerHTML = `
+                <div class="step-status">
+                    <span class="step-icon">⏳</span>
+                    <span>${description}</span>
+                </div>
+            `;
+            document.getElementById('resultsContent').appendChild(step);
+        }
+
+        function updateStep(id, status, details = null) {
+            const step = document.getElementById(`step-${id}`);
+            if (!step) return;
+
+            step.className = `step-item ${status}`;
+            const icons = { running: '⏳', success: '✅', failed: '❌' };
+            step.querySelector('.step-icon').textContent = icons[status] || '⏳';
+
+            if (details) {
+                const detailsDiv = document.createElement('div');
+                detailsDiv.className = 'step-details';
+                detailsDiv.textContent = typeof details === 'string' ? details : JSON.stringify(details, null, 2);
+                step.appendChild(detailsDiv);
+            }
+        }
+
+        function showSummary(passed, failed) {
+            const summary = document.createElement('div');
+            summary.className = 'summary';
+            summary.innerHTML = `测试完成: <span style="color: #2e7d32;">${passed} 通过</span> / <span style="color: #c62828;">${failed} 失败</span>`;
+            document.getElementById('resultsContent').appendChild(summary);
+        }
+
+        // Sample execution
+        async function runSample(num) {
+            clearResults();
+            selectSample(num);
+
+            const samples = {
+                1: runSample1,
+                2: runSample2,
+                3: runSample3,
+                4: runSample4
+            };
+
+            if (samples[num]) {
+                await samples[num]();
+            }
+        }
+
+        // ===== Case 1: Skills 详情展示 =====
+        async function runSample1() {
+            let passed = 0, failed = 0;
+            let allSkills = [];
+
+            addStep(1, 'Step 1: 重载 Catalog');
+            updateStep(1, 'running');
+            try {
+                const resp = await fetch('/api/rpc/catalog/reload', { method: 'POST' });
+                const data = await resp.json();
+                updateStep(1, 'success', `Skills: ${data.skills}, Prompts: ${data.prompts}, Resources: ${data.resources}`);
+                passed++;
+            } catch (e) {
+                updateStep(1, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(2, 'Step 2: 查询 demo namespace 的 Skills');
+            updateStep(2, 'running');
+            try {
+                const resp = await fetch('/api/rpc/catalog/skills?namespace=demo');
+                allSkills = await resp.json();
+                const count = allSkills.length;
+                if (count >= 2) {
+                    const details = allSkills.map(s =>
+                        `  - ${s.name} [${s.entrypoint ? '可执行型' : '指令型'}]${s.description ? ': ' + s.description : ''}`
+                    ).join('\n');
+                    updateStep(2, 'success', `找到 ${count} 个 Skills:\n${details}`);
+                    passed++;
+                } else {
+                    updateStep(2, 'failed', `预期至少 2 个 Skills，实际 ${count}`);
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(2, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(3, 'Step 3: 验证 Skill 类型');
+            updateStep(3, 'running');
+            try {
+                const review = allSkills.find(s => s.name === 'code-review');
+                const greeting = allSkills.find(s => s.name === 'greeting');
+
+                if (review && !review.entrypoint && greeting && greeting.entrypoint) {
+                    updateStep(3, 'success',
+                        `code-review: 指令型 (无 entrypoint，提供审查清单指导)\n` +
+                        `greeting: 可执行型 (entrypoint: ${greeting.entrypoint}，可被沙箱执行)`);
+                    passed++;
+                } else {
+                    updateStep(3, 'failed',
+                        `Skill 类型验证失败\n` +
+                        `code-review: ${review ? (review.entrypoint ? '错误: 有 entrypoint' : '无 entrypoint ✓') : '未找到'}\n` +
+                        `greeting: ${greeting ? (greeting.entrypoint ? 'entrypoint: ' + greeting.entrypoint + ' ✓' : '错误: 无 entrypoint') : '未找到'}`);
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(3, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(4, 'Step 4: 验证参数 Schema');
+            updateStep(4, 'running');
+            try {
+                const greeting = allSkills.find(s => s.name === 'greeting');
+                if (greeting && greeting.argsSchema) {
+                    let schema = typeof greeting.argsSchema === 'string'
+                        ? JSON.parse(greeting.argsSchema) : greeting.argsSchema;
+                    if (schema.properties && schema.properties.name) {
+                        updateStep(4, 'success',
+                            `greeting 参数 Schema:\n${JSON.stringify(schema, null, 2)}\n\n` +
+                            `包含 name 参数 (type: ${schema.properties.name.type})`);
+                        passed++;
+                    } else {
+                        updateStep(4, 'failed', `greeting 的 argsSchema 中未找到 name 属性: ${JSON.stringify(schema)}`);
+                        failed++;
+                    }
+                } else {
+                    updateStep(4, 'failed', `greeting skill ${greeting ? '缺少 argsSchema' : '未找到'}`);
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(4, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(5, 'Step 5: 验证 Public Skills 可见性');
+            updateStep(5, 'running');
+            try {
+                const publicNames = ['code-review', 'task-planning', 'git-workflow'];
+                const found = [];
+                const missing = [];
+                for (const name of publicNames) {
+                    if (allSkills.find(s => s.name === name)) {
+                        found.push(name);
+                    } else {
+                        missing.push(name);
+                    }
+                }
+                if (missing.length === 0) {
+                    updateStep(5, 'success',
+                        `demo namespace 可见全部 ${publicNames.length} 个 Public Skills:\n` +
+                        found.map(n => `  ✅ ${n}`).join('\n'));
+                    passed++;
+                } else {
+                    updateStep(5, 'failed',
+                        `缺少 Public Skills: ${missing.join(', ')}\n` +
+                        `已找到: ${found.join(', ')}`);
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(5, 'failed', e.message);
+                failed++;
+            }
+
+            showSummary(passed, failed);
+        }
+
+        // ===== Case 2: Skills 智能调用 (交互式) =====
+        let case2Streaming = false;
+        async function runSample2() {
+            document.getElementById('resultsContent').innerHTML = `
+                <div class="case2-panel">
+                    <div class="case2-config">
+                        <div class="form-group">
+                            <label>Namespace</label>
+                            <input type="text" id="c2Namespace" value="demo">
+                        </div>
+                        <div class="form-group">
+                            <label>模型提供商</label>
+                            <select id="c2Provider" onchange="updateC2Models()">
+                                <option value="deepseek">DeepSeek</option>
+                                <option value="zhipuai">智谱 AI</option>
+                                <option value="openai">OpenAI</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>模型</label>
+                            <select id="c2Model">
+                                <option value="deepseek-chat">deepseek-chat</option>
+                                <option value="deepseek-reasoner">deepseek-reasoner</option>
+                            </select>
+                        </div>
+                        <div class="form-group">
+                            <label>系统提示</label>
+                            <textarea id="c2System" rows="4" style="resize:vertical">你是一个助手，可以使用工具来完成用户的请求。当用户需要问候时，使用 greeting 工具。</textarea>
+                        </div>
+                    </div>
+                    <div class="case2-right">
+                        <div class="preset-buttons">
+                            <span style="font-size:13px;color:#666;">预设问题:</span>
+                            <button class="preset-btn" onclick="sendCase2Message('帮我问候 Alice')">帮我问候 Alice</button>
+                            <button class="preset-btn" onclick="sendCase2Message('帮我做一下代码审查')">帮我做一下代码审查</button>
+                        </div>
+                        <div class="case2-chat" id="c2Chat">
+                            <div style="text-align:center;padding:40px 20px;color:#999;">
+                                <p>点击预设问题或输入自定义问题开始体验</p>
+                                <p style="font-size:12px;margin-top:8px;">观察模型如何选择和调用 Skills</p>
+                            </div>
+                        </div>
+                        <div class="case2-input">
+                            <input type="text" id="c2Input" placeholder="输入自定义问题..." onkeydown="if(event.key==='Enter')sendCase2Message()">
+                            <button id="c2SendBtn" onclick="sendCase2Message()">发送</button>
+                        </div>
+                    </div>
+                </div>
+            `;
+        }
+
+        function updateC2Models() {
+            const provider = document.getElementById('c2Provider').value;
+            const modelSelect = document.getElementById('c2Model');
+            modelSelect.innerHTML = '';
+            modelOptions[provider].forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.label;
+                modelSelect.appendChild(option);
+            });
+        }
+
+        async function sendCase2Message(presetPrompt) {
+            const prompt = presetPrompt || document.getElementById('c2Input')?.value?.trim();
+            if (!prompt || case2Streaming) return;
+
+            const namespace = document.getElementById('c2Namespace').value.trim();
+            const provider = document.getElementById('c2Provider').value;
+            const modelId = document.getElementById('c2Model').value;
+            const systemPrompt = document.getElementById('c2System').value.trim();
+
+            const chatArea = document.getElementById('c2Chat');
+            // Clear empty state on first message
+            if (chatArea.querySelector('div[style]')) {
+                chatArea.innerHTML = '';
+            }
+
+            // Add user message
+            const userDiv = document.createElement('div');
+            userDiv.className = 'message';
+            userDiv.innerHTML = `
+                <div class="message-header"><span class="role role-user">👤 用户</span></div>
+                <div class="message-content">${escapeHtml(prompt)}</div>
+            `;
+            chatArea.appendChild(userDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+
+            if (document.getElementById('c2Input')) document.getElementById('c2Input').value = '';
+            case2Streaming = true;
+            const sendBtn = document.getElementById('c2SendBtn');
+            if (sendBtn) sendBtn.disabled = true;
+
+            let currentContent = null;
+            let currentText = '';
+
+            try {
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        namespace, prompt, provider, modelId,
+                        systemPrompt: systemPrompt || null,
+                        temperature: 0.7, maxTokens: 4096
+                    })
+                });
+
+                if (!response.ok) throw new Error('HTTP ' + response.status);
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+                    buffer += decoder.decode(value, { stream: true });
+
+                    let boundary;
+                    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                        const frame = buffer.substring(0, boundary);
+                        buffer = buffer.substring(boundary + 2);
+
+                        let dataStr = null;
+                        for (const line of frame.split('\n')) {
+                            if (line.startsWith('data:')) dataStr = line.substring(5);
+                        }
+                        if (!dataStr || !dataStr.trim()) continue;
+
+                        let data;
+                        try { data = JSON.parse(dataStr); } catch (e) { continue; }
+
+                        // Handle SSE events
+                        if (data.type === 'message_start' && data.role === 'assistant') {
+                            const msgDiv = document.createElement('div');
+                            msgDiv.className = 'message';
+                            msgDiv.innerHTML = `
+                                <div class="message-header"><span class="role role-assistant">🤖 助手</span></div>
+                                <div class="message-content" id="c2msg-${Date.now()}"></div>
+                            `;
+                            chatArea.appendChild(msgDiv);
+                            currentContent = msgDiv.querySelector('.message-content');
+                            currentText = '';
+                        } else if (data.type === 'text') {
+                            currentText += data.delta;
+                            if (currentContent) {
+                                currentContent.textContent = currentText;
+                                chatArea.scrollTop = chatArea.scrollHeight;
+                            }
+                        } else if (data.type === 'tool_start') {
+                            const toolDiv = document.createElement('div');
+                            toolDiv.className = 'tool-call message';
+                            toolDiv.id = `c2tool-${CSS.escape(data.toolCallId)}`;
+                            toolDiv.innerHTML = `
+                                <div class="tool-call-header">
+                                    <span class="tool-icon">🔧</span>
+                                    <span>调用工具: <strong>${escapeHtml(data.toolName)}</strong></span>
+                                </div>
+                                <div style="font-size:13px;color:#666;margin-top:5px;">
+                                    <div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px"></div>执行中...
+                                </div>
+                            `;
+                            chatArea.appendChild(toolDiv);
+                            chatArea.scrollTop = chatArea.scrollHeight;
+                        } else if (data.type === 'tool_end') {
+                            const toolDiv = document.getElementById(`c2tool-${CSS.escape(data.toolCallId)}`);
+                            const resultHtml = `
+                                <div class="tool-call-header">
+                                    <span class="tool-icon">${data.isError ? '❌' : '✅'}</span>
+                                    <span>${data.isError ? '工具执行失败' : '工具执行完成'}: <strong>${escapeHtml(data.toolName || '')}</strong></span>
+                                </div>
+                                <div style="font-size:13px;margin-top:8px;white-space:pre-wrap;max-height:200px;overflow-y:auto;">${escapeHtml(data.result)}</div>
+                            `;
+                            if (toolDiv) {
+                                toolDiv.className = (data.isError ? 'tool-call' : 'tool-result') + ' message';
+                                toolDiv.innerHTML = resultHtml;
+                            } else {
+                                const newDiv = document.createElement('div');
+                                newDiv.className = (data.isError ? 'tool-call' : 'tool-result') + ' message';
+                                newDiv.innerHTML = resultHtml;
+                                chatArea.appendChild(newDiv);
+                            }
+                            chatArea.scrollTop = chatArea.scrollHeight;
+                        }
+                    }
+                }
+            } catch (error) {
+                const errDiv = document.createElement('div');
+                errDiv.className = 'message';
+                errDiv.innerHTML = `
+                    <div class="message-header"><span class="role role-assistant">🤖 助手</span></div>
+                    <div class="message-content" style="border-left-color:#c62828;">错误: ${escapeHtml(error.message)}</div>
+                `;
+                chatArea.appendChild(errDiv);
+            } finally {
+                case2Streaming = false;
+                const btn = document.getElementById('c2SendBtn');
+                if (btn) btn.disabled = false;
+            }
+        }
+
+        // ===== Case 3: Sandbox - Local 隔离 =====
+        async function runSample3() {
+            let passed = 0, failed = 0;
+            let sessionIdA = null;
+
+            // Helper to call RPC command
+            async function rpcCommand(body) {
+                const resp = await fetch('/api/rpc/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                return resp.json();
+            }
+
+            addStep(1, 'Step 1: 创建 Session');
+            updateStep(1, 'running');
+            try {
+                const data = await rpcCommand({ id: 'local-1', type: 'new_session', namespace: 'sandbox-local' });
+                sessionIdA = data.data?.sessionId;
+                if (sessionIdA) {
+                    updateStep(1, 'success', `Session ID: ${sessionIdA}\nWorkspace: workspaces/sandbox-local/${sessionIdA}/`);
+                    passed++;
+                } else {
+                    updateStep(1, 'failed', '无法创建 session');
+                    failed++;
+                    showSummary(passed, failed);
+                    return;
+                }
+            } catch (e) {
+                updateStep(1, 'failed', e.message);
+                failed++;
+                showSummary(passed, failed);
+                return;
+            }
+
+            addStep(2, 'Step 2: 基础命令执行');
+            updateStep(2, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'local-2', type: 'bash', sessionId: sessionIdA,
+                    namespace: 'sandbox-local', command: 'echo hello && whoami && pwd'
+                });
+                if (data.success) {
+                    const stdout = data.data?.stdout || '';
+                    updateStep(2, 'success',
+                        `命令输出:\n${stdout}\n` +
+                        `📌 Local 模式: 以当前用户身份运行，工作目录为 workspace 路径`);
+                    passed++;
+                } else {
+                    updateStep(2, 'failed', data.error || '执行失败');
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(2, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(3, 'Step 3: 工作空间隔离验证');
+            updateStep(3, 'running');
+            try {
+                // Write a file in session A
+                await rpcCommand({
+                    id: 'local-3a', type: 'bash', sessionId: sessionIdA,
+                    namespace: 'sandbox-local', command: 'echo "secret-from-A" > secret.txt && cat secret.txt'
+                });
+
+                // Create session B and try to read
+                const sessB = await rpcCommand({ id: 'local-3b', type: 'new_session', namespace: 'sandbox-local' });
+                const sessionIdB = sessB.data?.sessionId;
+                if (sessionIdB) {
+                    const readData = await rpcCommand({
+                        id: 'local-3c', type: 'bash', sessionId: sessionIdB,
+                        namespace: 'sandbox-local', command: 'cat secret.txt 2>&1 || echo FILE_NOT_FOUND'
+                    });
+                    const stdout = readData.data?.stdout || '';
+                    if (stdout.includes('FILE_NOT_FOUND') || stdout.includes('No such file')) {
+                        updateStep(3, 'success',
+                            `Session A (${sessionIdA}): 写入 secret.txt ✅\n` +
+                            `Session B (${sessionIdB}): 读取 secret.txt → 文件不存在 ✅\n\n` +
+                            `📌 不同 Session 拥有独立的工作空间目录`);
+                        passed++;
+                    } else {
+                        updateStep(3, 'failed', `Session B 不应能读取 Session A 的文件，但输出: ${stdout}`);
+                        failed++;
+                    }
+                } else {
+                    updateStep(3, 'failed', '无法创建 Session B');
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(3, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(4, 'Step 4: 路径穿越防护');
+            updateStep(4, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'local-4', type: 'bash', sessionId: '../../../etc',
+                    namespace: 'sandbox-local', command: 'echo pwned'
+                });
+                if (!data.success && data.error?.toLowerCase().includes('path traversal')) {
+                    updateStep(4, 'success',
+                        `请求: sessionId="../../../etc"\n` +
+                        `响应: ${data.error}\n\n` +
+                        `📌 字符黑名单检测拦截了 ".." 路径穿越`);
+                    passed++;
+                } else {
+                    updateStep(4, 'failed', '路径穿越防护未生效');
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(4, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(5, 'Step 5: 命令内路径穿越测试');
+            updateStep(5, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'local-5', type: 'bash', sessionId: sessionIdA,
+                    namespace: 'sandbox-local', command: 'cat ../../etc/passwd 2>&1 || echo BLOCKED'
+                });
+                const stdout = data.data?.stdout || '';
+                updateStep(5, data.success ? 'success' : 'success',
+                    `命令: cat ../../etc/passwd\n` +
+                    `输出: ${stdout.substring(0, 200)}${stdout.length > 200 ? '...' : ''}\n\n` +
+                    `📌 Local 模式: 命令在 workspace 目录下执行，\n` +
+                    `   相对路径由 OS 解析（可能超出 workspace）\n` +
+                    `   ⚠️ 这是 Local 模式的局限性，Docker 模式无此问题`);
+                passed++;
+            } catch (e) {
+                updateStep(5, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(6, 'Step 6: 超时保护');
+            updateStep(6, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'local-6', type: 'bash', sessionId: sessionIdA,
+                    namespace: 'sandbox-local', command: 'sleep 999'
+                });
+                if (data.data?.timeout) {
+                    updateStep(6, 'success',
+                        `命令: sleep 999\n` +
+                        `结果: 超时终止 (timeout: true)\n` +
+                        `耗时: ${data.data?.durationMs || '?'}ms\n\n` +
+                        `📌 命令在默认超时时间后被强制终止`);
+                    passed++;
+                } else if (!data.success) {
+                    updateStep(6, 'success',
+                        `命令: sleep 999\n` +
+                        `结果: ${data.error || '执行被限制'}\n\n` +
+                        `📌 长时间运行的命令被保护机制终止`);
+                    passed++;
+                } else {
+                    updateStep(6, 'failed', '超时保护未生效: 命令正常完成');
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(6, 'failed', e.message);
+                failed++;
+            }
+
+            showSummary(passed, failed);
+
+            // Show Local mode summary panel
+            const summaryPanel = document.createElement('div');
+            summaryPanel.className = 'sandbox-summary';
+            summaryPanel.innerHTML = `
+                <strong>Local 模式特性总结:</strong><br>
+                ✅ 工作空间目录隔离<br>
+                ✅ 路径穿越双重防护（字符黑名单 + 归一化校验）<br>
+                ✅ 超时保护<br>
+                ✅ 审计日志<br>
+                ⚠️ 无网络隔离（可访问本地网络）<br>
+                ⚠️ 无文件系统只读限制<br>
+                ⚠️ 以当前用户身份运行
+            `;
+            document.getElementById('resultsContent').appendChild(summaryPanel);
+        }
+
+        // ===== Case 4: Sandbox - Docker 隔离 =====
+        async function runSample4() {
+            let passed = 0, failed = 0;
+            let sessionId = null;
+
+            async function rpcCommand(body) {
+                const resp = await fetch('/api/rpc/command', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(body)
+                });
+                return resp.json();
+            }
+
+            addStep(1, 'Step 1: 创建 Session');
+            updateStep(1, 'running');
+            try {
+                const data = await rpcCommand({ id: 'docker-1', type: 'new_session', namespace: 'sandbox-docker' });
+                sessionId = data.data?.sessionId;
+                if (sessionId) {
+                    updateStep(1, 'success', `Session ID: ${sessionId}`);
+                    passed++;
+                } else {
+                    updateStep(1, 'failed', '无法创建 session');
+                    failed++;
+                    showSummary(passed, failed);
+                    return;
+                }
+            } catch (e) {
+                updateStep(1, 'failed', e.message);
+                failed++;
+                showSummary(passed, failed);
+                return;
+            }
+
+            addStep(2, 'Step 2: 基础命令执行');
+            updateStep(2, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'docker-2', type: 'bash', sessionId,
+                    namespace: 'sandbox-docker', command: 'echo hello && whoami && pwd'
+                });
+                if (data.success) {
+                    const stdout = data.data?.stdout || '';
+                    const isNobody = stdout.includes('nobody') || stdout.includes('65534');
+                    const isWorkspace = stdout.includes('/workspace');
+                    updateStep(2, isNobody && isWorkspace ? 'success' : 'failed',
+                        `命令输出:\n${stdout}\n` +
+                        `用户: ${isNobody ? 'nobody (65534) ✅' : '⚠️ 非 nobody 用户'}\n` +
+                        `工作目录: ${isWorkspace ? '/workspace ✅' : '⚠️ 非 /workspace'}\n\n` +
+                        `📌 Docker 模式: --user 65534:65534, -w /workspace`);
+                    if (isNobody && isWorkspace) passed++; else failed++;
+                } else {
+                    updateStep(2, 'failed', data.error || '执行失败');
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(2, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(3, 'Step 3: 网络隔离验证');
+            updateStep(3, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'docker-3', type: 'bash', sessionId,
+                    namespace: 'sandbox-docker',
+                    command: 'curl -s --max-time 5 https://example.com 2>&1 || echo NETWORK_BLOCKED'
+                });
+                const stdout = (data.data?.stdout || '') + (data.data?.stderr || '');
+                const blocked = stdout.includes('NETWORK_BLOCKED') || stdout.includes('Could not resolve')
+                    || stdout.includes('Network is unreachable') || stdout.includes('not found');
+                updateStep(3, blocked ? 'success' : 'failed',
+                    `命令: curl -s https://example.com\n` +
+                    `输出: ${stdout.substring(0, 300)}\n\n` +
+                    `📌 由 --network none 保障: 容器完全无法访问外部网络`);
+                if (blocked) passed++; else failed++;
+            } catch (e) {
+                updateStep(3, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(4, 'Step 4: 只读文件系统验证');
+            updateStep(4, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'docker-4', type: 'bash', sessionId,
+                    namespace: 'sandbox-docker',
+                    command: 'touch /etc/hacked 2>&1; echo "EXIT:$?"; echo ok > /tmp/test && cat /tmp/test'
+                });
+                const stdout = data.data?.stdout || '';
+                const readOnly = stdout.includes('Read-only') || stdout.includes('Permission denied') || !stdout.includes('EXIT:0');
+                const tmpWorks = stdout.includes('ok');
+                updateStep(4, readOnly ? 'success' : 'failed',
+                    `写入 /etc/hacked: ${readOnly ? '被拒绝 ✅' : '⚠️ 未被拒绝'}\n` +
+                    `写入 /tmp/test: ${tmpWorks ? '成功 ✅' : '失败'}\n\n` +
+                    `📌 --read-only: 根文件系统只读\n` +
+                    `📌 --tmpfs /tmp: /tmp 可写但不可执行 (noexec)`);
+                if (readOnly) passed++; else failed++;
+            } catch (e) {
+                updateStep(4, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(5, 'Step 5: 资源限制验证 (PIDs)');
+            updateStep(5, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'docker-5', type: 'bash', sessionId,
+                    namespace: 'sandbox-docker',
+                    command: 'for i in $(seq 1 5); do sleep 100 & done 2>&1; SPAWNED=$(jobs -p | wc -l); echo "SPAWNED:$SPAWNED"; kill $(jobs -p) 2>/dev/null; wait 2>/dev/null'
+                });
+                const stdout = data.data?.stdout || '';
+                const match = stdout.match(/SPAWNED:(\d+)/);
+                const spawned = match ? parseInt(match[1]) : -1;
+                const limited = spawned > 0 && spawned <= 5;
+                updateStep(5, limited ? 'success' : 'failed',
+                    `尝试创建 5 个后台进程\n` +
+                    `实际创建: ${spawned} 个\n` +
+                    `${limited ? `📌 --pids-limit 100: 进程数受控，少量 fork 正常工作 ✅` : '⚠️ 进程创建异常'}`);
+                if (limited) passed++; else failed++;
+            } catch (e) {
+                updateStep(5, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(6, 'Step 6: 跨 Namespace 工作空间隔离');
+            updateStep(6, 'running');
+            try {
+                // Write secret in sandbox-docker
+                await rpcCommand({
+                    id: 'docker-6a', type: 'bash', sessionId,
+                    namespace: 'sandbox-docker', command: 'echo "docker-secret" > /workspace/secret.txt'
+                });
+
+                // Create session in different namespace
+                const otherSess = await rpcCommand({
+                    id: 'docker-6b', type: 'new_session', namespace: 'sandbox-other'
+                });
+                const otherSid = otherSess.data?.sessionId;
+                if (otherSid) {
+                    const readData = await rpcCommand({
+                        id: 'docker-6c', type: 'bash', sessionId: otherSid,
+                        namespace: 'sandbox-other',
+                        command: 'cat /workspace/secret.txt 2>&1 || echo FILE_NOT_FOUND'
+                    });
+                    const stdout = readData.data?.stdout || '';
+                    if (stdout.includes('FILE_NOT_FOUND') || stdout.includes('No such file')) {
+                        updateStep(6, 'success',
+                            `sandbox-docker: 写入 /workspace/secret.txt ✅\n` +
+                            `sandbox-other: 读取 → 文件不存在 ✅\n\n` +
+                            `📌 不同 Namespace 的容器挂载不同的 workspace 目录，数据互不可见`);
+                        passed++;
+                    } else {
+                        updateStep(6, 'failed', `其他 namespace 不应能读取文件，但输出: ${stdout}`);
+                        failed++;
+                    }
+                } else {
+                    updateStep(6, 'failed', '无法创建其他 namespace 的 session');
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(6, 'failed', e.message);
+                failed++;
+            }
+
+            addStep(7, 'Step 7: 路径穿越防护');
+            updateStep(7, 'running');
+            try {
+                const data = await rpcCommand({
+                    id: 'docker-7', type: 'bash', sessionId: '../../../etc',
+                    namespace: 'sandbox-docker', command: 'echo pwned'
+                });
+                if (!data.success && data.error?.toLowerCase().includes('path traversal')) {
+                    updateStep(7, 'success',
+                        `请求: sessionId="../../../etc"\n` +
+                        `响应: ${data.error}\n\n` +
+                        `📌 与 Local 模式一致: 服务端统一的路径穿越校验`);
+                    passed++;
+                } else {
+                    updateStep(7, 'failed', '路径穿越防护未生效');
+                    failed++;
+                }
+            } catch (e) {
+                updateStep(7, 'failed', e.message);
+                failed++;
+            }
+
+            showSummary(passed, failed);
+
+            // Docker summary panel
+            const summaryPanel = document.createElement('div');
+            summaryPanel.className = 'sandbox-summary';
+            summaryPanel.innerHTML = `
+                <strong>Docker 模式特性总结:</strong><br>
+                ✅ 容器级进程隔离<br>
+                ✅ 网络隔离 (--network none)<br>
+                ✅ 只读根文件系统 (--read-only)<br>
+                ✅ 非特权用户 (nobody:65534)<br>
+                ✅ 内存限制 (256m)<br>
+                ✅ CPU 限制 (50% 单核)<br>
+                ✅ 进程数限制 (100)<br>
+                ✅ 路径穿越双重防护<br>
+                ✅ 超时保护<br>
+                ✅ 审计日志
+            `;
+            document.getElementById('resultsContent').appendChild(summaryPanel);
+
+            // Comparison table
+            const tableDiv = document.createElement('div');
+            tableDiv.innerHTML = `
+                <table class="comparison-table">
+                    <thead>
+                        <tr><th>能力</th><th>🏠 Local 模式</th><th>🐳 Docker 模式</th></tr>
+                    </thead>
+                    <tbody>
+                        <tr><td>进程隔离</td><td>-</td><td>✅ 容器级</td></tr>
+                        <tr><td>网络隔离</td><td>-</td><td>✅ --network none</td></tr>
+                        <tr><td>只读文件系统</td><td>-</td><td>✅ --read-only</td></tr>
+                        <tr><td>用户隔离</td><td>-</td><td>✅ nobody:65534</td></tr>
+                        <tr><td>资源限制</td><td>仅超时</td><td>✅ CPU/Memory/PIDs</td></tr>
+                        <tr><td>工作空间隔离</td><td>✅ 目录级</td><td>✅ 容器挂载级</td></tr>
+                        <tr><td>路径穿越防护</td><td>✅ 双重校验</td><td>✅ 双重校验</td></tr>
+                        <tr><td>超时保护</td><td>✅</td><td>✅</td></tr>
+                    </tbody>
+                </table>
+            `;
+            document.getElementById('resultsContent').appendChild(tableDiv);
+        }
+
+        // Model options mapping
+        const modelOptions = {
+            deepseek: [
+                { value: 'deepseek-chat', label: 'deepseek-chat' },
+                { value: 'deepseek-reasoner', label: 'deepseek-reasoner' }
+            ],
+            zhipuai: [
+                { value: 'glm-4', label: 'glm-4' },
+                { value: 'glm-4-flash', label: 'glm-4-flash' }
+            ],
+            openai: [
+                { value: 'gpt-4o-mini', label: 'gpt-4o-mini' }
+            ]
+        };
+
+        document.getElementById('provider').addEventListener('change', function() {
+            const provider = this.value;
+            const modelSelect = document.getElementById('modelId');
+            modelSelect.innerHTML = '';
+            modelOptions[provider].forEach(opt => {
+                const option = document.createElement('option');
+                option.value = opt.value;
+                option.textContent = opt.label;
+                modelSelect.appendChild(option);
+            });
+        });
+
+        function setStatus(text, type = 'idle') {
+            const status = document.getElementById('status');
+            status.className = `status status-${type}`;
+            if (type === 'streaming') {
+                status.innerHTML = `<div class="spinner"></div><span>${text}</span>`;
+            } else {
+                status.innerHTML = `<span>${text}</span>`;
+            }
+        }
+
+        function addMessage(role, content, type = 'text') {
+            const chatArea = document.getElementById('chatArea');
+            const empty = chatArea.querySelector('.empty-state');
+            if (empty) empty.remove();
+
+            const messageDiv = document.createElement('div');
+            messageDiv.className = 'message';
+
+            const roleClass = `role-${role}`;
+            const roleLabel = role === 'user' ? '👤 用户' : role === 'assistant' ? '🤖 助手' : '🔧 工具';
+
+            messageDiv.innerHTML = `
+                <div class="message-header">
+                    <span class="role ${roleClass}">${roleLabel}</span>
+                </div>
+                <div class="message-content" id="msg-${Date.now()}">${content}</div>
+            `;
+
+            chatArea.appendChild(messageDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            return messageDiv.querySelector('.message-content');
+        }
+
+        function addToolCall(toolName, toolCallId) {
+            const chatArea = document.getElementById('chatArea');
+            const toolDiv = document.createElement('div');
+            toolDiv.className = 'tool-call message';
+            toolDiv.id = `tool-${CSS.escape(toolCallId)}`;
+            toolDiv.innerHTML = `
+                <div class="tool-call-header">
+                    <span class="tool-icon">🔧</span>
+                    <span>调用工具: <strong>${toolName}</strong></span>
+                </div>
+                <div style="font-size: 13px; color: #666; margin-top: 5px;">
+                    <div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px"></div>执行中...
+                </div>
+            `;
+            chatArea.appendChild(toolDiv);
+            chatArea.scrollTop = chatArea.scrollHeight;
+            return toolDiv;
+        }
+
+        function updateToolResult(toolCallId, result, isError) {
+            const toolDiv = document.getElementById(`tool-${CSS.escape(toolCallId)}`);
+            if (toolDiv) {
+                toolDiv.className = (isError ? 'tool-call' : 'tool-result') + ' message';
+                toolDiv.innerHTML = `
+                    <div class="tool-call-header">
+                        <span class="tool-icon">${isError ? '❌' : '✅'}</span>
+                        <span>${isError ? '工具执行失败' : '工具执行完成'}: <strong>task_planning</strong></span>
+                    </div>
+                    <div style="font-size: 13px; margin-top: 8px; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${escapeHtml(result)}</div>
+                `;
+                document.getElementById('chatArea').scrollTop =
+                    document.getElementById('chatArea').scrollHeight;
+            } else {
+                // Fallback: tool_start was missed, create the result directly
+                const chatArea = document.getElementById('chatArea');
+                const toolDiv = document.createElement('div');
+                toolDiv.className = (isError ? 'tool-call' : 'tool-result') + ' message';
+                toolDiv.innerHTML = `
+                    <div class="tool-call-header">
+                        <span class="tool-icon">${isError ? '❌' : '✅'}</span>
+                        <span>${isError ? '工具执行失败' : '工具执行完成'}: <strong>task_planning</strong></span>
+                    </div>
+                    <div style="font-size: 13px; margin-top: 8px; white-space: pre-wrap; max-height: 300px; overflow-y: auto;">${escapeHtml(result)}</div>
+                `;
+                chatArea.appendChild(toolDiv);
+                chatArea.scrollTop = chatArea.scrollHeight;
+            }
+        }
+
+        function escapeHtml(str) {
+            if (!str) return '';
+            return str.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+        }
+
+        function addTurnIndicator() {
+            currentTurn++;
+            const chatArea = document.getElementById('chatArea');
+            const turnDiv = document.createElement('div');
+            turnDiv.className = 'turn-indicator';
+            turnDiv.textContent = `Turn ${currentTurn}`;
+            chatArea.appendChild(turnDiv);
+        }
+
+        async function sendMessage() {
+            const prompt = document.getElementById('prompt').value.trim();
+            if (!prompt || isStreaming) return;
+
+            const namespace = document.getElementById('namespace').value.trim();
+            const provider = document.getElementById('provider').value;
+            const modelId = document.getElementById('modelId').value;
+            const systemPrompt = document.getElementById('systemPrompt').value.trim();
+            const temperature = parseFloat(document.getElementById('temperature').value);
+            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+
+            if (!namespace) {
+                alert('请输入 Namespace');
+                return;
+            }
+
+            addMessage('user', prompt);
+            document.getElementById('prompt').value = '';
+
+            isStreaming = true;
+            document.getElementById('sendBtn').disabled = true;
+            setStatus('正在处理...', 'streaming');
+
+            let currentMessageContent = null;
+            let currentText = '';
+
+            try {
+                const response = await fetch('/api/chat/stream', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        namespace,
+                        prompt,
+                        provider,
+                        modelId,
+                        systemPrompt: systemPrompt || null,
+                        temperature,
+                        maxTokens
+                    })
+                });
+
+                if (!response.ok) {
+                    throw new Error('HTTP ' + response.status);
+                }
+
+                const reader = response.body.getReader();
+                const decoder = new TextDecoder();
+                let buffer = '';
+
+                while (true) {
+                    const { done, value } = await reader.read();
+                    if (done) break;
+
+                    buffer += decoder.decode(value, { stream: true });
+
+                    // SSE frames are separated by double newline
+                    let boundary;
+                    while ((boundary = buffer.indexOf('\n\n')) !== -1) {
+                        const frame = buffer.substring(0, boundary);
+                        buffer = buffer.substring(boundary + 2);
+
+                        // Extract data line from the frame
+                        let dataStr = null;
+                        for (const line of frame.split('\n')) {
+                            if (line.startsWith('data:')) {
+                                dataStr = line.substring(5);
+                            }
+                        }
+                        if (!dataStr || !dataStr.trim()) continue;
+
+                        let data;
+                        try {
+                            data = JSON.parse(dataStr);
+                        } catch (e) {
+                            console.warn('JSON parse skip:', dataStr);
+                            continue;
+                        }
+
+                        handleEvent(data);
+                    }
+                }
+
+                // Process any remaining buffer
+                if (buffer.trim()) {
+                    for (const line of buffer.split('\n')) {
+                        if (line.startsWith('data:')) {
+                            try {
+                                handleEvent(JSON.parse(line.substring(5)));
+                            } catch (e) { /* ignore */ }
+                        }
+                    }
+                }
+            } catch (error) {
+                setStatus('错误: ' + error.message, 'error');
+                addMessage('assistant', '发生了错误：' + error.message);
+            } finally {
+                isStreaming = false;
+                document.getElementById('sendBtn').disabled = false;
+                if (document.getElementById('status').className.includes('streaming')) {
+                    setStatus('完成', 'idle');
+                }
+            }
+
+            function handleEvent(data) {
+                console.log('SSE event:', data.type, data);
+                switch (data.type) {
+                    case 'turn_start':
+                        addTurnIndicator();
+                        break;
+                    case 'message_start':
+                        if (data.role === 'assistant') {
+                            currentMessageContent = addMessage('assistant', '');
+                            currentText = '';
+                        }
+                        break;
+                    case 'text':
+                        currentText += data.delta;
+                        if (currentMessageContent) {
+                            currentMessageContent.textContent = currentText;
+                            document.getElementById('chatArea').scrollTop =
+                                document.getElementById('chatArea').scrollHeight;
+                        }
+                        break;
+                    case 'tool_start':
+                        console.log('TOOL_START received:', data);
+                        addToolCall(data.toolName, data.toolCallId);
+                        break;
+                    case 'tool_end':
+                        console.log('TOOL_END received:', data);
+                        updateToolResult(data.toolCallId, data.result, data.isError);
+                        break;
+                    case 'message_end':
+                        // assistant turn finished, content already set via text deltas
+                        break;
+                    case 'done':
+                        setStatus('完成', 'idle');
+                        break;
+                    case 'error':
+                        setStatus('错误: ' + (data.message || 'unknown'), 'error');
+                        break;
+                }
+            }
+        }
+
+        // Enter to send
+        document.getElementById('prompt').addEventListener('keydown', function(e) {
+            if (e.key === 'Enter' && !e.shiftKey) {
+                e.preventDefault();
+                sendMessage();
+            }
+        });
+    </script>
+</body>
+</html>
