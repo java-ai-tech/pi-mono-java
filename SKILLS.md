@@ -9,7 +9,7 @@ Skills 是框架的可扩展能力单元。每个 Skill 是一个目录，包含
 Skills 系统实现了三个关键能力：
 1. **Namespace 隔离** — 不同租户看到不同的技能集
 2. **两种执行模式** — 指令型（LLM 指导）和 脚本型（沙箱执行）
-3. **热重载** — 运行时更新技能无需重启
+3. **手动热重载** — 运行时更新技能无需重启，但需要显式调用 reload 接口
 
 ## 架构
 
@@ -71,13 +71,13 @@ Deploys the application to the specified environment.
 
 YAML frontmatter 用 `---` 分隔，支持两个字段：
 - `entrypoint` — 可执行脚本的路径（相对于 SKILL.md 所在目录）
-- `args_schema` — 参数的 JSON Schema（可选，供 LLM 生成参数时参考）
+- `args_schema` — 参数的 JSON Schema（可选，目前仅做元数据存储/返回，尚未直接用于 `SkillAgentTool.parametersSchema()`）
   - 支持单引号或双引号包裹的 JSON 字符串
   - 示例：`args_schema: '{"type":"object"}'` 或 `args_schema: "{\"type\":\"object\"}"`
 
 ### 加载过程
 
-`ResourceCatalogService` 在启动时扫描配置的技能目录：
+`ResourceCatalogService` 在启动时与 `POST /api/rpc/catalog/reload` 时扫描配置的技能目录：
 
 ```java
 // 1. 遍历技能目录，找到所有 SKILL.md
@@ -95,9 +95,10 @@ private void readSkill(Path path) {
     String entrypoint = extractFrontmatterField(content, "entrypoint");
     String argsSchema = extractFrontmatterField(content, "args_schema");
 
-    SkillInfo skill = new SkillInfo(name, description, path.toString(),
+    SkillInfo skill = new SkillInfo(name, description, path.toAbsolutePath().toString(),
                                      content, entrypoint, argsSchema);
-    skills.put(skill.name(), skill);
+    // 使用绝对路径作为 key，允许不同 scope 存在同名 skill
+    skills.put(path.toAbsolutePath().toString(), skill);
 }
 ```
 
@@ -128,7 +129,7 @@ pi:
 
 或通过环境变量：
 ```bash
-export DELPHI_AGENT_SKILLS_DIRS=./skills,/opt/shared-skills
+export PI_AGENT_SKILLS_DIRS=./skills,/opt/shared-skills
 ```
 
 ## 阶段 2：Namespace 可见性解析
@@ -185,7 +186,7 @@ private boolean matchesSkillScope(String skillPath, String scope) {
 解析结果按 namespace 缓存在 `ConcurrentHashMap` 中。以下场景会清除缓存：
 
 - `POST /api/rpc/catalog/reload` — 重载 catalog 后自动清除全部缓存
-- `POST /api/skills/reload?namespace=xxx` — 清除指定 namespace 缓存
+- `POST /api/skills/reload?namespace=xxx` — 仅清除缓存（不重扫磁盘）
 
 ```java
 public void invalidateCache(String namespace) {
@@ -196,6 +197,10 @@ public void invalidateCache(String namespace) {
     }
 }
 ```
+
+生效时机说明：
+- 调用 `POST /api/rpc/catalog/reload` 成功返回后，下一次 skills 解析请求即使用最新磁盘内容。
+- 正在执行中的请求不会被中途替换，变更对后续请求生效。
 
 ## 阶段 3：Skills → AgentTool 转换
 
@@ -232,6 +237,9 @@ agent.state().tools(tools);
 ```
 
 LLM 根据工具描述决定是否调用。
+
+> 当前默认实现中，Skills 自动注入发生在 `/api/chat/stream` 路径。  
+> `AgentSessionRuntime` 的 session 模式默认不会自动把 Skills 转成 tools 注入 Agent。
 
 ## 阶段 4：Skill 执行
 
@@ -375,7 +383,7 @@ data: {"type":"tool_end","toolName":"skill_deploy","result":"Deploying to stagin
 |------|------|
 | `GET /api/skills?namespace=xxx` | 查询 namespace 可见的 skills |
 | `GET /api/skills/{name}?namespace=xxx` | 获取指定 skill 详情 |
-| `POST /api/skills/reload?namespace=xxx` | 重载 namespace 的 skill 缓存 |
+| `POST /api/skills/reload?namespace=xxx` | 仅清理 namespace 的 skill 缓存（不重扫磁盘） |
 | `GET /api/rpc/catalog/skills?namespace=xxx` | RPC 接口查询 skills（namespace 必填） |
 | `POST /api/rpc/catalog/reload` | 重载全部 catalog + 清除全部 skill 缓存 |
 

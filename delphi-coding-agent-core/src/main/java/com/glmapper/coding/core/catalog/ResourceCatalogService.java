@@ -260,7 +260,16 @@ public class ResourceCatalogService {
         if (content == null || content.isBlank()) {
             return Optional.empty();
         }
-        String[] lines = content.split("\n");
+
+        String text = content;
+        if (text.startsWith("---")) {
+            int endIdx = text.indexOf("\n---", 3);
+            if (endIdx >= 0) {
+                text = text.substring(endIdx + 4);
+            }
+        }
+
+        String[] lines = text.split("\n");
         for (String line : lines) {
             String trimmed = line.trim();
             if (!trimmed.isBlank()) {

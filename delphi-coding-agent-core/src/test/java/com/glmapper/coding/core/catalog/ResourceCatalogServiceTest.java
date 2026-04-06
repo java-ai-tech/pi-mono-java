@@ -6,6 +6,7 @@ import org.junit.jupiter.api.io.TempDir;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.List;
 
 import static org.junit.jupiter.api.Assertions.*;
 
@@ -62,5 +63,24 @@ class ResourceCatalogServiceTest {
         assertEquals("shared-skill", service.skillsByScope("public").get(0).name());
         assertEquals(1, service.skillsByScope("namespaces/tenant-a").size());
         assertEquals("private-skill", service.skillsByScope("namespaces/tenant-a").get(0).name());
+    }
+
+    @Test
+    void skillDescriptionShouldSkipFrontmatter(@TempDir Path tempDir) throws Exception {
+        Path skillsDir = tempDir.resolve("skills");
+        Path skill = skillsDir.resolve("public").resolve("route-skill").resolve("SKILL.md");
+        Files.createDirectories(skill.getParent());
+        Files.writeString(skill, """
+                ---
+                entrypoint: "./run.sh"
+                ---
+                # Route Skill
+                Handle routing with SSE
+                """, StandardCharsets.UTF_8);
+
+        ResourceCatalogService service = new ResourceCatalogService(skillsDir.toString(), "", "");
+        List<SkillInfo> loaded = service.skillsByScope("public");
+        assertEquals(1, loaded.size());
+        assertEquals("Route Skill", loaded.get(0).description());
     }
 }
