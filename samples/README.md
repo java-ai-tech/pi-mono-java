@@ -29,7 +29,7 @@
 ```bash
 # 启动服务
 cd delphi-agent
-mvn spring-boot:run -pl delphi-coding-agent-server
+mvn spring-boot:run -pl delphi-agent-server
 
 # 运行单个案例
 bash samples/1-basic-skill-usage/test.sh

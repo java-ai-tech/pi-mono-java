@@ -40,17 +40,12 @@
             </dependency>
             <dependency>
                 <groupId>com.glmapper</groupId>
-                <artifactId>delphi-ai-api</artifactId>
+                <artifactId>delphi-agent-ai-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.glmapper</groupId>
-                <artifactId>delphi-ai-spi</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.glmapper</groupId>
-                <artifactId>delphi-ai-provider-springai</artifactId>
+                <artifactId>delphi-agent-springai-provider</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
@@ -60,43 +55,29 @@
             </dependency>
             <dependency>
                 <groupId>com.glmapper</groupId>
-                <artifactId>delphi-coding-agent-core</artifactId>
+                <artifactId>delphi-agent-runtime</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.glmapper</groupId>
-                <artifactId>delphi-coding-agent-sdk</artifactId>
+                <artifactId>delphi-agent-http-api</artifactId>
                 <version>${project.version}</version>
             </dependency>
             <dependency>
                 <groupId>com.glmapper</groupId>
-                <artifactId>delphi-coding-agent-http-api</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.glmapper</groupId>
-                <artifactId>delphi-coding-agent-spring-boot-starter</artifactId>
-                <version>${project.version}</version>
-            </dependency>
-            <dependency>
-                <groupId>com.glmapper</groupId>
-                <artifactId>delphi-coding-agent-server</artifactId>
+                <artifactId>delphi-agent-server</artifactId>
                 <version>${project.version}</version>
             </dependency>
         </dependencies>
     </dependencyManagement>
 
     <modules>
-        <module>delphi-bom</module>
-        <module>delphi-ai-api</module>
-        <module>delphi-ai-spi</module>
-        <module>delphi-ai-provider-springai</module>
+        <module>delphi-agent-ai-api</module>
+        <module>delphi-agent-springai-provider</module>
         <module>delphi-agent-core</module>
-        <module>delphi-coding-agent-core</module>
-        <module>delphi-coding-agent-sdk</module>
-        <module>delphi-coding-agent-http-api</module>
-        <module>delphi-coding-agent-spring-boot-starter</module>
-        <module>delphi-coding-agent-server</module>
+        <module>delphi-agent-runtime</module>
+        <module>delphi-agent-http-api</module>
+        <module>delphi-agent-server</module>
     </modules>
 
     <build>

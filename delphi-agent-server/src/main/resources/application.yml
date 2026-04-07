@@ -1,0 +1,30 @@
+spring:
+#  profiles:
+#    active: local-dev
+  config:
+    import: optional:file:.env[.properties]
+  application:
+    name: delphi-agent-server
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:}
+    zhipuai:
+      api-key: ${ZHIPUAI_API_KEY:}
+
+pi:
+  resources:
+    skills-dirs: ${PI_AGENT_SKILLS_DIRS:./skills,${user.home}/.codex/skills}
+    prompts-dirs: ${PI_AGENT_PROMPTS_DIRS:./prompts}
+    resources-dirs: ${PI_AGENT_RESOURCES_DIRS:./resources}
+
+management:
+  endpoints:
+    web:
+      exposure:
+        include: health,info,metrics,prometheus
+
+server:
+  port: ${PORT:8080}

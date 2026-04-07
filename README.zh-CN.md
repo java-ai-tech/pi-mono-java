@@ -15,11 +15,11 @@
 - 可插拔模型/Provider 体系
 - Skill 目录加载与沙箱执行
 
-本仓库既包含可复用组件，也包含可直接运行的参考服务 `delphi-coding-agent-server`。
+本仓库既包含可复用组件，也包含可直接运行的参考服务 `delphi-agent-server`。
 
 ## 核心能力
 
-- 通过 `delphi-ai-spi` 统一模型调度（`AiRuntime`、`ApiProviderRegistry`、`ModelCatalog`）
+- 通过 `delphi-agent-ai-api` 统一模型调度（`AiRuntime`、`ApiProviderRegistry`、`ModelCatalog`）
 - Agent 运行时支持工具调用（并行/串行）
 - 会话能力：create、prompt、continue、steer、follow-up、fork、tree navigate、compact
 - 提供 Session / RPC / Skills / 直接流式聊天等 HTTP API
@@ -32,16 +32,12 @@
 
 | 模块 | 职责 |
 | --- | --- |
-| `delphi-ai-api` | 统一 AI 协议：模型、消息、内容块、流事件 |
-| `delphi-ai-spi` | Provider SPI 与运行时调度 |
-| `delphi-ai-provider-springai` | Spring AI 适配实现 |
+| `delphi-agent-ai-api` | 统一 AI 协议、Provider SPI 与运行时调度 |
+| `delphi-agent-springai-provider` | Spring AI 适配实现 |
 | `delphi-agent-core` | Agent turn loop 与工具编排核心 |
-| `delphi-coding-agent-core` | 会话运行时、持久化、沙箱执行、资源目录、RPC 处理 |
-| `delphi-coding-agent-sdk` | Java SDK（`DelphiCodingAgentSdk`） |
-| `delphi-coding-agent-http-api` | REST / SSE 控制器层 |
-| `delphi-coding-agent-spring-boot-starter` | 嵌入式自动配置 Starter |
-| `delphi-coding-agent-server` | 可运行的 Spring Boot 服务 |
-| `delphi-bom` | 依赖版本管理 BOM |
+| `delphi-agent-runtime` | 会话运行时、持久化、沙箱执行、资源目录、SDK、RPC 处理 |
+| `delphi-agent-http-api` | REST / SSE 控制器层 |
+| `delphi-agent-server` | 可运行的 Spring Boot 服务（含自动配置） |
 
 ## 参考服务内置模型
 
@@ -100,10 +96,10 @@ PI_AGENT_RESOURCES_DIRS=./resources
 set -a && source .env && set +a
 
 # 默认：Docker 隔离执行后端
-mvn -q -pl delphi-coding-agent-server spring-boot:run
+mvn -q -pl delphi-agent-server spring-boot:run
 
 # 开发模式：本地后端（无需 Docker）
-mvn -q -pl delphi-coding-agent-server spring-boot:run -Dspring-boot.run.profiles=local-dev
+mvn -q -pl delphi-agent-server spring-boot:run -Dspring-boot.run.profiles=local-dev
 ```
 
 默认地址：`http://localhost:8080`
@@ -301,5 +297,5 @@ mvn test
 仅运行某模块测试：
 
 ```bash
-mvn -pl delphi-coding-agent-core test
+mvn -pl delphi-agent-runtime test
 ```

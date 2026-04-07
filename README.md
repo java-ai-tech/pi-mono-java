@@ -16,11 +16,11 @@ It provides:
 - Pluggable model/provider architecture
 - Skill catalog + sandboxed skill execution
 
-This repository contains both reusable libraries and a runnable reference server (`delphi-coding-agent-server`).
+This repository contains both reusable libraries and a runnable reference server (`delphi-agent-server`).
 
 ## Key Capabilities
 
-- Multi-provider model runtime via `delphi-ai-spi` (`AiRuntime`, `ApiProviderRegistry`, `ModelCatalog`)
+- Multi-provider model runtime via `delphi-agent-ai-api` (`AiRuntime`, `ApiProviderRegistry`, `ModelCatalog`)
 - Agent execution core with parallel/sequential tool execution support
 - Session features: create, prompt, continue, steer, follow-up, fork, tree navigation, compact
 - HTTP APIs for Session, RPC, Skill catalog, and one-shot streaming chat
@@ -33,16 +33,12 @@ This repository contains both reusable libraries and a runnable reference server
 
 | Module | Responsibility |
 | --- | --- |
-| `delphi-ai-api` | Unified AI contracts: model, messages, content blocks, stream events |
-| `delphi-ai-spi` | Provider SPI and runtime dispatch |
-| `delphi-ai-provider-springai` | Spring AI adapter implementation |
+| `delphi-agent-ai-api` | Unified AI contracts, provider SPI, and runtime dispatch |
+| `delphi-agent-springai-provider` | Spring AI adapter implementation |
 | `delphi-agent-core` | Core turn-loop agent runtime and tool orchestration |
-| `delphi-coding-agent-core` | Session runtime, persistence, sandbox execution, resource catalog, RPC processor |
-| `delphi-coding-agent-sdk` | Java SDK facade (`DelphiCodingAgentSdk`) |
-| `delphi-coding-agent-http-api` | REST/SSE controllers |
-| `delphi-coding-agent-spring-boot-starter` | Auto-configuration starter for embedding |
-| `delphi-coding-agent-server` | Runnable Spring Boot server |
-| `delphi-bom` | Dependency BOM |
+| `delphi-agent-runtime` | Session runtime, persistence, sandbox execution, resource catalog, SDK, RPC processor |
+| `delphi-agent-http-api` | REST/SSE controllers |
+| `delphi-agent-server` | Runnable Spring Boot server with auto-configuration |
 
 ## Reference Server: Built-in Providers and Models
 
@@ -101,10 +97,10 @@ PI_AGENT_RESOURCES_DIRS=./resources
 set -a && source .env && set +a
 
 # Docker-isolated backend (default)
-mvn -q -pl delphi-coding-agent-server spring-boot:run
+mvn -q -pl delphi-agent-server spring-boot:run
 
 # Local backend (development only, no Docker required)
-mvn -q -pl delphi-coding-agent-server spring-boot:run -Dspring-boot.run.profiles=local-dev
+mvn -q -pl delphi-agent-server spring-boot:run -Dspring-boot.run.profiles=local-dev
 ```
 
 Server default: `http://localhost:8080`
@@ -302,5 +298,5 @@ mvn test
 Run a specific module:
 
 ```bash
-mvn -pl delphi-coding-agent-core test
+mvn -pl delphi-agent-runtime test
 ```

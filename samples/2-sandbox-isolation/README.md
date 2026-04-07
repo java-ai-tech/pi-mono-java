@@ -31,10 +31,10 @@
 
 ```bash
 # 使用 DockerIsolatedBackend（默认）
-mvn spring-boot:run -pl delphi-coding-agent-server
+mvn spring-boot:run -pl delphi-agent-server
 
 # 使用 LocalIsolatedBackend（开发模式）
-mvn spring-boot:run -pl delphi-coding-agent-server -Dspring.profiles.active=local-dev
+mvn spring-boot:run -pl delphi-agent-server -Dspring.profiles.active=local-dev
 ```
 
 ## 测试步骤

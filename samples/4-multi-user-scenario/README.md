@@ -32,7 +32,7 @@ team-alpha/
 ```bash
 # 启动服务
 cd delphi-agent
-mvn spring-boot:run -pl delphi-coding-agent-server
+mvn spring-boot:run -pl delphi-agent-server
 ```
 
 ## 测试步骤

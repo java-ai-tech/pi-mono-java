@@ -14,11 +14,7 @@
     <dependencies>
         <dependency>
             <groupId>com.glmapper</groupId>
-            <artifactId>delphi-ai-api</artifactId>
-        </dependency>
-        <dependency>
-            <groupId>com.glmapper</groupId>
-            <artifactId>delphi-ai-spi</artifactId>
+            <artifactId>delphi-agent-ai-api</artifactId>
         </dependency>
     </dependencies>
 </project>

@@ -391,10 +391,10 @@ data: {"type":"tool_end","toolName":"skill_deploy","result":"Deploying to stagin
 
 | 文件 | 职责 |
 |------|------|
-| `delphi-coding-agent-core/.../catalog/SkillInfo.java` | Skill 数据模型（name, entrypoint, argsSchema 等） |
-| `delphi-coding-agent-core/.../catalog/ResourceCatalogService.java` | 从文件系统加载 skills，解析 frontmatter |
-| `delphi-coding-agent-core/.../catalog/SkillsResolver.java` | Namespace 可见性解析与缓存 |
-| `delphi-coding-agent-core/.../tools/SkillAgentTool.java` | Skill → AgentTool 适配器，execute 分派 |
-| `delphi-coding-agent-http-api/.../controller/StreamChatController.java` | 将 Skills 注入 Agent 工具列表 |
-| `delphi-coding-agent-http-api/.../controller/SkillsController.java` | Skills HTTP API |
-| `delphi-coding-agent-http-api/.../controller/RpcController.java` | RPC catalog API |
+| `delphi-agent-runtime/.../catalog/SkillInfo.java` | Skill 数据模型（name, entrypoint, argsSchema 等） |
+| `delphi-agent-runtime/.../catalog/ResourceCatalogService.java` | 从文件系统加载 skills，解析 frontmatter |
+| `delphi-agent-runtime/.../catalog/SkillsResolver.java` | Namespace 可见性解析与缓存 |
+| `delphi-agent-runtime/.../tools/SkillAgentTool.java` | Skill → AgentTool 适配器，execute 分派 |
+| `delphi-agent-http-api/.../controller/StreamChatController.java` | 将 Skills 注入 Agent 工具列表 |
+| `delphi-agent-http-api/.../controller/SkillsController.java` | Skills HTTP API |
+| `delphi-agent-http-api/.../controller/RpcController.java` | RPC catalog API |
