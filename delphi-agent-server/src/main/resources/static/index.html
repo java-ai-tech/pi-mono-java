@@ -116,7 +116,6 @@
             border-radius: 12px;
             border-left: 4px solid #667eea;
             box-shadow: 0 2px 8px rgba(0,0,0,0.1);
-            white-space: pre-wrap;
             word-wrap: break-word;
             line-height: 1.6;
         }
@@ -411,6 +410,63 @@
             font-weight: 500;
         }
     </style>
+    <script src="https://cdn.jsdelivr.net/npm/marked/marked.min.js"></script>
+    <style>
+        /* Markdown rendered content styles */
+        .msg-text p { margin: 0.4em 0; }
+        .msg-text p:first-child { margin-top: 0; }
+        .msg-text p:last-child { margin-bottom: 0; }
+        .msg-text pre {
+            background: #1e1e1e;
+            color: #d4d4d4;
+            padding: 12px 14px;
+            border-radius: 8px;
+            overflow-x: auto;
+            font-size: 13px;
+            line-height: 1.5;
+            margin: 8px 0;
+        }
+        .msg-text code {
+            background: #f0f0f0;
+            padding: 2px 5px;
+            border-radius: 4px;
+            font-size: 13px;
+            font-family: 'SF Mono', Consolas, monospace;
+        }
+        .msg-text pre code {
+            background: none;
+            padding: 0;
+            border-radius: 0;
+            color: inherit;
+        }
+        .msg-text ul, .msg-text ol { margin: 0.4em 0; padding-left: 1.5em; }
+        .msg-text li { margin: 0.2em 0; }
+        .msg-text h1, .msg-text h2, .msg-text h3, .msg-text h4 {
+            margin: 0.6em 0 0.3em;
+            line-height: 1.3;
+        }
+        .msg-text h1 { font-size: 1.3em; }
+        .msg-text h2 { font-size: 1.15em; }
+        .msg-text h3 { font-size: 1.05em; }
+        .msg-text blockquote {
+            margin: 0.4em 0;
+            padding: 4px 12px;
+            border-left: 3px solid #ddd;
+            color: #666;
+        }
+        .msg-text table {
+            border-collapse: collapse;
+            margin: 8px 0;
+            font-size: 13px;
+        }
+        .msg-text th, .msg-text td {
+            border: 1px solid #ddd;
+            padding: 6px 10px;
+        }
+        .msg-text th { background: #f5f5f5; font-weight: 600; }
+        .msg-text hr { border: none; border-top: 1px solid #e0e0e0; margin: 8px 0; }
+        .msg-text strong { font-weight: 600; }
+    </style>
 </head>
 <body>
     <div class="container">
@@ -449,12 +505,20 @@
                     <textarea id="systemPrompt" placeholder="例如：你是一个专业的编程助手"></textarea>
                 </div>
                 <div class="form-group">
-                    <label>Temperature</label>
-                    <input type="number" id="temperature" value="0.7" min="0" max="2" step="0.1">
+                    <label>执行模式</label>
+                    <select id="chatMode">
+                        <option value="agent">Agent 模式（直接对话）</option>
+                        <option value="orchestrated">规划模式（任务分解+逐步执行）</option>
+                    </select>
+                    <div style="font-size:12px;color:#888;margin-top:4px;" id="modeHint">LLM 自主决定是否调用工具</div>
                 </div>
                 <div class="form-group">
-                    <label>Max Tokens</label>
-                    <input type="number" id="maxTokens" value="4096" min="100" max="8192" step="100">
+                    <label>Session ID</label>
+                    <input type="text" id="sessionId" placeholder="留空自动创建新 Session">
+                    <div style="font-size:12px;color:#888;margin-top:4px;" id="sessionHint"></div>
+                </div>
+                <div class="form-group" style="margin-top:8px;">
+                    <button class="btn" style="background:#e74c3c;padding:8px;font-size:13px;" onclick="clearSession()">清除 Session</button>
                 </div>
             </div>
             <div class="right-panel">
@@ -494,13 +558,13 @@
                     </div>
                     <div class="sample-card" onclick="selectSample(3)">
                         <h3>🏠 案例 3: Sandbox - Local</h3>
-                        <p>本地隔离模式：目录隔离、路径防护、超时保护</p>
-                        <button class="btn" onclick="event.stopPropagation(); runSample(3)">运行案例</button>
+                        <p>本地隔离模式（RPC 接口已合并，暂不可用）</p>
+                        <button class="btn" style="background:#ccc;cursor:not-allowed;" disabled>暂不可用</button>
                     </div>
                     <div class="sample-card" onclick="selectSample(4)">
                         <h3>🐳 案例 4: Sandbox - Docker</h3>
-                        <p>Docker 容器隔离：网络/文件系统/资源限制</p>
-                        <button class="btn" onclick="event.stopPropagation(); runSample(4)">运行案例</button>
+                        <p>Docker 容器隔离（RPC 接口已合并，暂不可用）</p>
+                        <button class="btn" style="background:#ccc;cursor:not-allowed;" disabled>暂不可用</button>
                     </div>
                 </div>
                 <div class="results-area">
@@ -519,6 +583,15 @@
         let currentTurn = 0;
         let isStreaming = false;
         let selectedSample = null;
+
+        // Configure marked
+        marked.setOptions({ breaks: true, gfm: true });
+
+        // Debounced markdown renderer — avoids re-parsing on every token
+        let _mdTimer = null;
+        function renderMarkdown(el, text) {
+            el.innerHTML = marked.parse(text);
+        }
 
         // Tab switching
         function switchTab(tab) {
@@ -607,7 +680,7 @@
             addStep(1, 'Step 1: 重载 Catalog');
             updateStep(1, 'running');
             try {
-                const resp = await fetch('/api/rpc/catalog/reload', { method: 'POST' });
+                const resp = await fetch('/api/catalog/reload', { method: 'POST' });
                 const data = await resp.json();
                 updateStep(1, 'success', `Skills: ${data.skills}, Prompts: ${data.prompts}, Resources: ${data.resources}`);
                 passed++;
@@ -619,7 +692,7 @@
             addStep(2, 'Step 2: 查询 demo namespace 的 Skills');
             updateStep(2, 'running');
             try {
-                const resp = await fetch('/api/rpc/catalog/skills?namespace=demo');
+                const resp = await fetch('/api/catalog/skills?namespace=demo');
                 allSkills = await resp.json();
                 const count = allSkills.length;
                 if (count >= 2) {
@@ -819,8 +892,7 @@
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         namespace, prompt, provider, modelId,
-                        systemPrompt: systemPrompt || null,
-                        temperature: 0.7, maxTokens: 4096
+                        systemPrompt: systemPrompt || null
                     })
                 });
 
@@ -863,7 +935,12 @@
                         } else if (data.type === 'text') {
                             currentText += data.delta;
                             if (currentContent) {
-                                currentContent.textContent = currentText;
+                                if (!currentContent.querySelector('.msg-text')) {
+                                    const md = document.createElement('div');
+                                    md.className = 'msg-text';
+                                    currentContent.appendChild(md);
+                                }
+                                renderMarkdown(currentContent.querySelector('.msg-text'), currentText);
                                 chatArea.scrollTop = chatArea.scrollHeight;
                             }
                         } else if (data.type === 'tool_start') {
@@ -1463,8 +1540,8 @@
             const provider = document.getElementById('provider').value;
             const modelId = document.getElementById('modelId').value;
             const systemPrompt = document.getElementById('systemPrompt').value.trim();
-            const temperature = parseFloat(document.getElementById('temperature').value);
-            const maxTokens = parseInt(document.getElementById('maxTokens').value);
+            const mode = document.getElementById('chatMode').value;
+            const sessionId = document.getElementById('sessionId').value.trim() || null;
 
             if (!namespace) {
                 alert('请输入 Namespace');
@@ -1476,24 +1553,26 @@
 
             isStreaming = true;
             document.getElementById('sendBtn').disabled = true;
-            setStatus('正在处理...', 'streaming');
+            setStatus(mode === 'orchestrated' ? '规划模式处理中...' : '处理中...', 'streaming');
 
             let currentMessageContent = null;
             let currentText = '';
 
             try {
+                const requestBody = {
+                    namespace,
+                    prompt,
+                    provider,
+                    modelId,
+                    systemPrompt: systemPrompt || null,
+                    sessionId,
+                    mode: mode === 'orchestrated' ? 'orchestrated' : null
+                };
+
                 const response = await fetch('/api/chat/stream', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({
-                        namespace,
-                        prompt,
-                        provider,
-                        modelId,
-                        systemPrompt: systemPrompt || null,
-                        temperature,
-                        maxTokens
-                    })
+                    body: JSON.stringify(requestBody)
                 });
 
                 if (!response.ok) {
@@ -1510,13 +1589,11 @@
 
                     buffer += decoder.decode(value, { stream: true });
 
-                    // SSE frames are separated by double newline
                     let boundary;
                     while ((boundary = buffer.indexOf('\n\n')) !== -1) {
                         const frame = buffer.substring(0, boundary);
                         buffer = buffer.substring(boundary + 2);
 
-                        // Extract data line from the frame
                         let dataStr = null;
                         for (const line of frame.split('\n')) {
                             if (line.startsWith('data:')) {
@@ -1537,7 +1614,6 @@
                     }
                 }
 
-                // Process any remaining buffer
                 if (buffer.trim()) {
                     for (const line of buffer.split('\n')) {
                         if (line.startsWith('data:')) {
@@ -1560,7 +1636,14 @@
 
             function handleEvent(data) {
                 console.log('SSE event:', data.type, data);
+                const chatArea = document.getElementById('chatArea');
                 switch (data.type) {
+                    case 'session_created':
+                        if (data.sessionId) {
+                            document.getElementById('sessionId').value = data.sessionId;
+                            document.getElementById('sessionHint').textContent = '已自动创建';
+                        }
+                        break;
                     case 'turn_start':
                         addTurnIndicator();
                         break;
@@ -1573,21 +1656,115 @@
                     case 'text':
                         currentText += data.delta;
                         if (currentMessageContent) {
-                            currentMessageContent.textContent = currentText;
-                            document.getElementById('chatArea').scrollTop =
-                                document.getElementById('chatArea').scrollHeight;
+                            let textNode = currentMessageContent.querySelector('.msg-text');
+                            if (!textNode) {
+                                textNode = document.createElement('div');
+                                textNode.className = 'msg-text';
+                                currentMessageContent.appendChild(textNode);
+                            }
+                            renderMarkdown(textNode, currentText);
+                            chatArea.scrollTop = chatArea.scrollHeight;
                         }
                         break;
                     case 'tool_start':
-                        console.log('TOOL_START received:', data);
-                        addToolCall(data.toolName, data.toolCallId);
+                        if (currentMessageContent) {
+                            const toolDiv = document.createElement('div');
+                            toolDiv.id = 'inline-tool-' + CSS.escape(data.toolCallId);
+                            toolDiv.style.cssText = 'margin:8px 0;padding:8px 10px;background:#fff8e1;border-radius:8px;border-left:3px solid #ffa726;font-size:13px;';
+                            toolDiv.innerHTML = `<span style="color:#f57c00;">🔧 调用工具: <strong>${escapeHtml(data.toolName)}</strong></span> <span class="tool-spinner" style="color:#999;font-size:12px;">执行中...</span>`;
+                            currentMessageContent.appendChild(toolDiv);
+                            chatArea.scrollTop = chatArea.scrollHeight;
+                        }
                         break;
-                    case 'tool_end':
-                        console.log('TOOL_END received:', data);
-                        updateToolResult(data.toolCallId, data.result, data.isError);
+                    case 'tool_end': {
+                        const toolDiv = document.getElementById('inline-tool-' + CSS.escape(data.toolCallId));
+                        if (toolDiv) {
+                            const icon = data.isError ? '❌' : '✅';
+                            const label = data.isError ? '工具执行失败' : '工具执行完成';
+                            toolDiv.style.background = data.isError ? '#ffebee' : '#e8f5e9';
+                            toolDiv.style.borderLeftColor = data.isError ? '#e53935' : '#43a047';
+                            toolDiv.innerHTML = `<span style="color:${data.isError ? '#c62828' : '#2e7d32'};">${icon} ${label}: <strong>${escapeHtml(data.toolName || '')}</strong></span>`;
+                        }
+                        chatArea.scrollTop = chatArea.scrollHeight;
+                        break;
+                    }
+                    case 'planning_started':
+                        setStatus('正在生成执行计划...', 'streaming');
+                        break;
+                    case 'planning_progress':
+                        setStatus(data.message || '规划中...', 'streaming');
+                        break;
+                    case 'planning_completed':
+                        setStatus('计划生成完成，开始执行', 'streaming');
+                        if (data.steps && currentMessageContent) {
+                            const planDiv = document.createElement('div');
+                            planDiv.style.cssText = 'margin:10px 0;padding:10px 12px;background:#f5f7ff;border-radius:8px;border-left:3px solid #667eea;font-size:13px;';
+                            const stepsHtml = (data.steps || []).map((s, i) =>
+                                `<div style="padding:4px 0;border-bottom:1px solid #e8eaf6;">
+                                    <span style="color:#667eea;font-weight:600;">${i+1}.</span> ${escapeHtml(s.title || s.description || '')}
+                                    <span style="color:#999;font-size:11px;margin-left:6px;">[${s.executorType || 'AGENT'}]</span>
+                                </div>`
+                            ).join('');
+                            planDiv.innerHTML = `<div style="font-weight:600;color:#3f51b5;margin-bottom:6px;">📋 执行计划：${escapeHtml(data.goal || '')}</div>${stepsHtml}`;
+                            currentMessageContent.appendChild(planDiv);
+                            chatArea.scrollTop = chatArea.scrollHeight;
+                        }
+                        break;
+                    case 'execution_started':
+                        setStatus(`执行中 (0/${data.totalSteps || '?'})`, 'streaming');
+                        break;
+                    case 'step_started':
+                        setStatus(`[${data.index}/${data.total}] ${data.title}`, 'streaming');
+                        if (currentMessageContent) {
+                            const stepDiv = document.createElement('div');
+                            stepDiv.className = 'inline-step';
+                            stepDiv.id = 'inline-step-' + data.index;
+                            stepDiv.style.cssText = 'margin:6px 0;padding:6px 10px;background:#fff3e0;border-radius:6px;border-left:3px solid #ffa726;font-size:13px;';
+                            stepDiv.innerHTML = `<div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;width:12px;height:12px;border-width:2px;"></div><span style="color:#f57c00;font-weight:600;">[${data.index}/${data.total}]</span> ${escapeHtml(data.title)}`;
+                            currentMessageContent.appendChild(stepDiv);
+                            chatArea.scrollTop = chatArea.scrollHeight;
+                        }
+                        break;
+                    case 'step_output':
+                        currentText += data.delta;
+                        if (currentMessageContent) {
+                            let textNode = currentMessageContent.querySelector('.msg-text');
+                            if (!textNode) {
+                                textNode = document.createElement('div');
+                                textNode.className = 'msg-text';
+                                currentMessageContent.appendChild(textNode);
+                            }
+                            renderMarkdown(textNode, currentText);
+                            chatArea.scrollTop = chatArea.scrollHeight;
+                        }
+                        break;
+                    case 'step_completed': {
+                        const steps = currentMessageContent ? currentMessageContent.querySelectorAll('.inline-step') : [];
+                        const lastStep = steps[steps.length - 1];
+                        if (lastStep) {
+                            lastStep.style.background = '#e8f5e9';
+                            lastStep.style.borderLeftColor = '#43a047';
+                            const spinner = lastStep.querySelector('.spinner');
+                            if (spinner) spinner.outerHTML = '✅ ';
+                        }
+                        break;
+                    }
+                    case 'step_failed': {
+                        const steps = currentMessageContent ? currentMessageContent.querySelectorAll('.inline-step') : [];
+                        const lastStep = steps[steps.length - 1];
+                        if (lastStep) {
+                            lastStep.style.background = '#ffebee';
+                            lastStep.style.borderLeftColor = '#e53935';
+                            const spinner = lastStep.querySelector('.spinner');
+                            if (spinner) spinner.outerHTML = '❌ ';
+                            if (data.error) lastStep.innerHTML += `<div style="color:#c62828;font-size:12px;margin-top:4px;">${escapeHtml(data.error)}</div>`;
+                        }
+                        break;
+                    }
+                    case 'ack':
+                        setStatus('命令已执行: ' + (data.command || ''), 'idle');
                         break;
                     case 'message_end':
-                        // assistant turn finished, content already set via text deltas
                         break;
                     case 'done':
                         setStatus('完成', 'idle');
@@ -1598,6 +1775,76 @@
                 }
             }
         }
+
+        function clearSession() {
+            document.getElementById('sessionId').value = '';
+            document.getElementById('sessionHint').textContent = '';
+            document.getElementById('chatArea').innerHTML = `
+                <div class="empty-state">
+                    <svg viewBox="0 0 24 24" fill="currentColor">
+                        <path d="M20 2H4c-1.1 0-2 .9-2 2v18l4-4h14c1.1 0 2-.9 2-2V4c0-1.1-.9-2-2-2z"/>
+                    </svg>
+                    <p>输入消息开始对话</p>
+                </div>`;
+            setStatus('就绪', 'idle');
+        }
+
+        function addPlanSummary(data) {
+            const chatArea = document.getElementById('chatArea');
+            const div = document.createElement('div');
+            div.className = 'message';
+            let stepsHtml = (data.steps || []).map((s, i) =>
+                `<div style="padding:6px 0;border-bottom:1px solid #eee;font-size:13px;">
+                    <span style="color:#667eea;font-weight:600;">${i+1}.</span> ${escapeHtml(s.title || s.description || '')}
+                    <span style="color:#999;font-size:12px;margin-left:8px;">[${s.executorType || 'AGENT'}]</span>
+                </div>`
+            ).join('');
+            div.innerHTML = `
+                <div class="message-header"><span class="role" style="background:#e8eaf6;color:#3f51b5;">📋 执行计划</span></div>
+                <div class="message-content" style="border-left-color:#3f51b5;">
+                    <div style="font-weight:600;margin-bottom:8px;">${escapeHtml(data.goal || '')}</div>
+                    ${stepsHtml}
+                </div>`;
+            chatArea.appendChild(div);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function addStepIndicator(index, total, title, status) {
+            const chatArea = document.getElementById('chatArea');
+            const div = document.createElement('div');
+            div.className = 'step-indicator-live';
+            div.id = 'step-live-' + index;
+            const color = status === 'running' ? '#f57c00' : status === 'success' ? '#2e7d32' : '#c62828';
+            const icon = status === 'running' ? '<div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;"></div>' : '';
+            div.innerHTML = `<div style="padding:8px 12px;background:#f5f7ff;border-radius:8px;border-left:3px solid ${color};margin:8px 0;font-size:13px;">
+                ${icon}<span style="font-weight:600;color:${color};">[${index}/${total}]</span> ${escapeHtml(title)}
+            </div>`;
+            chatArea.appendChild(div);
+            chatArea.scrollTop = chatArea.scrollHeight;
+        }
+
+        function updateLastStepIndicator(status, error) {
+            const indicators = document.querySelectorAll('.step-indicator-live');
+            const last = indicators[indicators.length - 1];
+            if (!last) return;
+            const color = status === 'success' ? '#2e7d32' : '#c62828';
+            const icon = status === 'success' ? '✅' : '❌';
+            const bar = last.querySelector('div');
+            if (bar) {
+                bar.style.borderLeftColor = color;
+                const spinner = bar.querySelector('.spinner');
+                if (spinner) spinner.outerHTML = icon + ' ';
+                if (error) bar.innerHTML += `<div style="color:#c62828;font-size:12px;margin-top:4px;">${escapeHtml(error)}</div>`;
+            }
+        }
+
+        // Mode hint update
+        document.getElementById('chatMode').addEventListener('change', function() {
+            const hint = document.getElementById('modeHint');
+            hint.textContent = this.value === 'orchestrated'
+                ? '先生成结构化计划，再逐步执行'
+                : 'LLM 自主决定是否调用工具';
+        });
 
         // Enter to send
         document.getElementById('prompt').addEventListener('keydown', function(e) {

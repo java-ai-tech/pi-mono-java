@@ -81,7 +81,8 @@ public class PlannerService {
         agent.state().systemPrompt(buildPlanningSystemPrompt(systemPrompt));
         agent.state().tools(tools);
         PlanningEventObserver effectiveObserver = observer == null ? new PlanningEventObserver() { } : observer;
-        agent.subscribe(event -> handlePlanningEvent(effectiveObserver, event));
+        String[] lastPhase = {""};
+        agent.subscribe(event -> handlePlanningEvent(effectiveObserver, event, lastPhase));
         effectiveObserver.onPlanningStatus("规划 agent 已启动，正在分析请求和可用 skills。");
 
         try {
@@ -423,10 +424,10 @@ public class PlannerService {
         );
     }
 
-    private void handlePlanningEvent(PlanningEventObserver observer, AgentEvent event) {
+    private void handlePlanningEvent(PlanningEventObserver observer, AgentEvent event, String[] lastPhase) {
         if (event instanceof AgentEvent.MessageStart messageStart
                 && messageStart.message() instanceof com.glmapper.agent.core.AgentAssistantMessage) {
-            observer.onPlanningStatus("规划模型开始生成任务清单。");
+            emitPhaseOnce(observer, "generating", "规划模型开始生成任务清单。", lastPhase);
             return;
         }
         if (event instanceof AgentEvent.MessageUpdate messageUpdate
@@ -434,21 +435,22 @@ public class PlannerService {
             AssistantMessageEvent assistantEvent = messageUpdate.assistantMessageEvent();
             if (assistantEvent instanceof AssistantMessageEvent.ThinkingStart
                     || assistantEvent instanceof AssistantMessageEvent.ThinkingDelta) {
-                observer.onPlanningStatus("规划模型正在分析任务。");
+                emitPhaseOnce(observer, "thinking", "规划模型正在分析任务。", lastPhase);
                 return;
             }
             if (assistantEvent instanceof AssistantMessageEvent.ToolCallStart
                     || assistantEvent instanceof AssistantMessageEvent.ToolCallDelta) {
-                observer.onPlanningStatus("规划模型正在选择合适的工具和 skills。");
+                emitPhaseOnce(observer, "tool_selecting", "规划模型正在选择合适的工具和 skills。", lastPhase);
                 return;
             }
             if (assistantEvent instanceof AssistantMessageEvent.TextStart
                     || assistantEvent instanceof AssistantMessageEvent.TextDelta) {
-                observer.onPlanningStatus("规划模型正在生成结构化任务清单。");
+                emitPhaseOnce(observer, "text_generating", "规划模型正在生成结构化任务清单。", lastPhase);
                 return;
             }
         }
         if (event instanceof AgentEvent.ToolExecutionStart toolStart) {
+            lastPhase[0] = ""; // reset so post-tool phases fire again
             observer.onToolStart(toolStart.toolCallId(), toolStart.toolName());
             return;
         }
@@ -459,6 +461,13 @@ public class PlannerService {
                     extractText(toolEnd.result().content()),
                     toolEnd.isError()
             );
+        }
+    }
+
+    private void emitPhaseOnce(PlanningEventObserver observer, String phase, String message, String[] lastPhase) {
+        if (!phase.equals(lastPhase[0])) {
+            lastPhase[0] = phase;
+            observer.onPlanningStatus(message);
         }
     }
 }
