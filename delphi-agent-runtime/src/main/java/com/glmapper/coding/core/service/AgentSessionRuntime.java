@@ -41,9 +41,11 @@ public class AgentSessionRuntime {
     private final ModelCatalog modelCatalog;
     private final ObjectMapper objectMapper;
     private final ExtensionRuntime extensionRuntime;
+    private final SessionLifecycleManager lifecycleManager;
+    private final SessionPromptQueue promptQueue;
+    private final BranchSummarizer branchSummarizer;
+    private final TokenEstimator tokenEstimator;
 
-    private final Map<String, Agent> liveAgents = new ConcurrentHashMap<>();
-    private final Map<String, AutoCloseable> agentSubscriptions = new ConcurrentHashMap<>();
     private final Map<String, List<Consumer<AgentEvent>>> eventListeners = new ConcurrentHashMap<>();
 
     public AgentSessionRuntime(
@@ -51,14 +53,30 @@ public class AgentSessionRuntime {
             SessionEntryRepository entryRepository,
             AiRuntime aiRuntime,
             ModelCatalog modelCatalog,
-            ExtensionRuntime extensionRuntime
+            ExtensionRuntime extensionRuntime,
+            SessionLifecycleManager lifecycleManager,
+            SessionPromptQueue promptQueue,
+            BranchSummarizer branchSummarizer
     ) {
         this.sessionRepository = sessionRepository;
         this.entryRepository = entryRepository;
         this.aiRuntime = aiRuntime;
         this.modelCatalog = modelCatalog;
         this.extensionRuntime = extensionRuntime;
+        this.lifecycleManager = lifecycleManager;
+        this.promptQueue = promptQueue;
+        this.branchSummarizer = branchSummarizer;
+        this.tokenEstimator = new TokenEstimator();
         this.objectMapper = new ObjectMapper();
+
+        // Set up eviction callback to persist conversation before eviction
+        this.lifecycleManager.setOnEvict(managed -> {
+            try {
+                persistConversation(managed.sessionId, managed.agent.state().messages());
+            } catch (Exception e) {
+                // Log but don't propagate
+            }
+        });
     }
 
     public String createSession(CreateSessionCommand command) {
@@ -87,49 +105,79 @@ public class AgentSessionRuntime {
         session.setUpdatedAt(Instant.now());
 
         SessionDocument saved = sessionRepository.save(session);
-        Agent agent = buildAgentFromSession(saved, List.of());
-        liveAgents.put(saved.getId(), agent);
-        registerAgentSubscription(saved.getId(), agent);
-        return saved.getId();
+        String id = saved.getId();
+        String ns2 = saved.getNamespace();
+        Agent[] holder = new Agent[1];
+        lifecycleManager.getOrCreate(
+                id,
+                ns2,
+                () -> {
+                    holder[0] = buildAgentFromSession(saved, List.of());
+                    return holder[0];
+                },
+                () -> holder[0].subscribe(event -> dispatchEvent(id, event))
+        );
+        return id;
     }
 
     public CompletableFuture<Void> prompt(String sessionId, String namespace, String text) {
         validateNamespace(sessionId, namespace);
-        Agent agent = getOrCreateLiveAgent(sessionId);
-        return agent.prompt(text).thenRun(() -> {
-            persistConversation(sessionId, agent.state().messages());
-            maybeAutoCompact(sessionId, agent);
+        lifecycleManager.touch(sessionId);
+        return promptQueue.submit(sessionId, () -> {
+            Agent agent = getOrCreateLiveAgent(sessionId);
+            String runId = UUID.randomUUID().toString();
+            lifecycleManager.setActiveRun(sessionId, runId);
+            return agent.prompt(text).whenComplete((result, error) -> {
+                lifecycleManager.clearActiveRun(sessionId);
+                if (error == null) {
+                    persistConversation(sessionId, agent.state().messages());
+                    maybeAutoCompact(sessionId, agent);
+                }
+            });
         });
     }
 
     public CompletableFuture<Void> cont(String sessionId, String namespace) {
         validateNamespace(sessionId, namespace);
-        Agent agent = getOrCreateLiveAgent(sessionId);
-        return agent.cont().thenRun(() -> {
-            persistConversation(sessionId, agent.state().messages());
-            maybeAutoCompact(sessionId, agent);
+        lifecycleManager.touch(sessionId);
+        return promptQueue.submit(sessionId, () -> {
+            Agent agent = getOrCreateLiveAgent(sessionId);
+            String runId = UUID.randomUUID().toString();
+            lifecycleManager.setActiveRun(sessionId, runId);
+            return agent.cont().whenComplete((result, error) -> {
+                lifecycleManager.clearActiveRun(sessionId);
+                if (error == null) {
+                    persistConversation(sessionId, agent.state().messages());
+                    maybeAutoCompact(sessionId, agent);
+                }
+            });
         });
     }
 
     public void steer(String sessionId, String namespace, String text) {
         validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
         Agent agent = getOrCreateLiveAgent(sessionId);
         agent.steer(new AgentUserMessage(List.of(new TextContent(text, null)), System.currentTimeMillis()));
     }
 
     public void followUp(String sessionId, String namespace, String text) {
         validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
         Agent agent = getOrCreateLiveAgent(sessionId);
         agent.followUp(new AgentUserMessage(List.of(new TextContent(text, null)), System.currentTimeMillis()));
     }
 
     public void abort(String sessionId, String namespace) {
         validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
         getOrCreateLiveAgent(sessionId).abort();
+        promptQueue.cancel(sessionId);
     }
 
     public void setModel(String sessionId, String namespace, String provider, String modelId) {
         validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
         SessionDocument session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
         Model model = resolveModel(provider, modelId);
@@ -144,6 +192,7 @@ public class AgentSessionRuntime {
 
     public void setThinkingLevel(String sessionId, String namespace, ThinkingLevel thinkingLevel) {
         validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
         SessionDocument session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
         Agent agent = getOrCreateLiveAgent(sessionId);
@@ -254,6 +303,7 @@ public class AgentSessionRuntime {
 
     public SessionStateSnapshot state(String sessionId, String namespace) {
         validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
         SessionDocument session = sessionRepository.findById(sessionId)
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
         Agent agent = getOrCreateLiveAgent(sessionId);
@@ -271,6 +321,7 @@ public class AgentSessionRuntime {
 
     public List<AgentMessage> messages(String sessionId, String namespace) {
         validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
         return getOrCreateLiveAgent(sessionId).state().messages();
     }
 
@@ -331,9 +382,15 @@ public class AgentSessionRuntime {
         sessionRepository.save(savedFork);
 
         Agent agent = buildAgentFromSession(savedFork, path);
-        liveAgents.put(savedFork.getId(), agent);
-        registerAgentSubscription(savedFork.getId(), agent);
-        return savedFork.getId();
+        String forkId = savedFork.getId();
+        String forkNs = savedFork.getNamespace() == null || savedFork.getNamespace().isBlank() ? "default" : savedFork.getNamespace();
+        lifecycleManager.getOrCreate(
+                forkId,
+                forkNs,
+                () -> agent,
+                () -> agent.subscribe(event -> dispatchEvent(forkId, event))
+        );
+        return forkId;
     }
 
     public void navigateTree(String sessionId, String namespace, String entryId) {
@@ -347,13 +404,43 @@ public class AgentSessionRuntime {
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
 
         List<SessionEntryDocument> entries = entryRepository.findBySessionIdOrderByTimestampAsc(sessionId);
-        List<SessionEntryDocument> path = resolvePathEntries(entries, entryId);
-        List<AgentMessage> restoredMessages = deserializeEntries(path);
+
+        // Get current and new paths
+        List<SessionEntryDocument> currentPath = resolvePathEntries(entries, session.getHeadEntryId());
+        List<SessionEntryDocument> newPath = resolvePathEntries(entries, entryId);
+
+        // Find abandoned entries (in current path but not in new path)
+        List<SessionEntryDocument> abandonedEntries = currentPath.stream()
+                .filter(entry -> newPath.stream().noneMatch(e -> e.getEntryId().equals(entry.getEntryId())))
+                .filter(entry -> "message".equals(entry.getType()))
+                .toList();
+
+        // Summarize abandoned branch if non-empty
+        if (!abandonedEntries.isEmpty()) {
+            Model model = resolveModel(session.getModelProvider(), session.getModelId());
+            String summary = branchSummarizer.summarizeBranch(abandonedEntries, model, aiRuntime);
+            if (summary != null && !summary.isBlank()) {
+                SessionEntryDocument branchSummary = new SessionEntryDocument();
+                branchSummary.setSessionId(sessionId);
+                branchSummary.setEntryId(UUID.randomUUID().toString());
+                branchSummary.setParentId(null);
+                branchSummary.setType("branch_summary");
+                Map<String, Object> payload = new LinkedHashMap<>();
+                payload.put("summary", summary);
+                payload.put("abandonedEntryCount", abandonedEntries.size());
+                payload.put("timestamp", System.currentTimeMillis());
+                branchSummary.setPayload(payload);
+                branchSummary.setTimestamp(Instant.now());
+                entryRepository.save(branchSummary);
+            }
+        }
+
+        List<AgentMessage> restoredMessages = deserializeEntries(newPath);
 
         Agent agent = getOrCreateLiveAgent(sessionId);
         agent.state().messages(restoredMessages);
 
-        session.setHeadEntryId(path.isEmpty() ? null : path.get(path.size() - 1).getEntryId());
+        session.setHeadEntryId(newPath.isEmpty() ? null : newPath.get(newPath.size() - 1).getEntryId());
         session.setPersistedMessageCount(restoredMessages.size());
         session.setUpdatedAt(Instant.now());
         sessionRepository.save(session);
@@ -440,15 +527,21 @@ public class AgentSessionRuntime {
     }
 
     private Agent getOrCreateLiveAgent(String sessionId) {
-        return liveAgents.computeIfAbsent(sessionId, id -> {
-            SessionDocument session = sessionRepository.findById(id)
-                    .orElseThrow(() -> new IllegalArgumentException("Session not found: " + id));
-            List<SessionEntryDocument> entries = entryRepository.findBySessionIdOrderByTimestampAsc(id);
-            List<SessionEntryDocument> path = resolvePathEntries(entries, session.getHeadEntryId());
-            Agent agent = buildAgentFromSession(session, path);
-            registerAgentSubscription(id, agent);
-            return agent;
-        });
+        SessionDocument session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+        List<SessionEntryDocument> entries = entryRepository.findBySessionIdOrderByTimestampAsc(sessionId);
+        List<SessionEntryDocument> path = resolvePathEntries(entries, session.getHeadEntryId());
+        String namespace = session.getNamespace() == null || session.getNamespace().isBlank() ? "default" : session.getNamespace();
+        Agent[] holder = new Agent[1];
+        return lifecycleManager.getOrCreate(
+                sessionId,
+                namespace,
+                () -> {
+                    holder[0] = buildAgentFromSession(session, path);
+                    return holder[0];
+                },
+                () -> holder[0].subscribe(event -> dispatchEvent(sessionId, event))
+        );
     }
 
     private Agent buildAgentFromSession(SessionDocument session, List<SessionEntryDocument> entries) {
@@ -486,18 +579,6 @@ public class AgentSessionRuntime {
             }
         }
         return restoredMessages;
-    }
-
-    private void registerAgentSubscription(String sessionId, Agent agent) {
-        AutoCloseable old = agentSubscriptions.get(sessionId);
-        if (old != null) {
-            try {
-                old.close();
-            } catch (Exception ignored) {
-            }
-        }
-        AutoCloseable subscription = agent.subscribe(event -> dispatchEvent(sessionId, event));
-        agentSubscriptions.put(sessionId, subscription);
     }
 
     private void dispatchEvent(String sessionId, AgentEvent event) {
@@ -890,9 +971,16 @@ public class AgentSessionRuntime {
         if (!session.isAutoCompactionEnabled()) {
             return;
         }
-        if (agent.state().messages().size() >= 60) {
+
+        long estimatedTokens = tokenEstimator.estimateTotal(agent.state().messages());
+        int contextWindow = agent.state().model().contextWindow();
+        boolean tokenOverflow = contextWindow > 0 && estimatedTokens > (long)(contextWindow * 0.8);
+        boolean messageOverflow = agent.state().messages().size() >= 60;
+
+        if (tokenOverflow || messageOverflow) {
+            int keepCount = tokenOverflow ? Math.max(10, agent.state().messages().size() / 4) : 20;
             String namespace = session.getNamespace() == null || session.getNamespace().isBlank() ? "default" : session.getNamespace();
-            compact(sessionId, namespace, 20);
+            compact(sessionId, namespace, keepCount);
         }
     }
 
@@ -913,5 +1001,14 @@ public class AgentSessionRuntime {
             throw new IllegalArgumentException("Model not found: " + provider + "/" + modelId);
         }
         return model.get();
+    }
+
+    /**
+     * Public wrapper for persisting orchestration results.
+     * Used by OrchestratedChatService in Phase 4.
+     */
+    public void persistOrchestrationResult(String sessionId, String namespace, List<AgentMessage> messages) {
+        validateNamespace(sessionId, namespace);
+        persistConversation(sessionId, messages);
     }
 }
