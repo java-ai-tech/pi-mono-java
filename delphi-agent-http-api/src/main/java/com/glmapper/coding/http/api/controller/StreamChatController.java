@@ -7,6 +7,8 @@ import com.glmapper.coding.core.orchestration.OrchestratedChatService;
 import com.glmapper.coding.core.service.AgentSessionRuntime;
 import com.glmapper.coding.http.api.config.SessionEventBroker;
 import com.glmapper.coding.http.api.dto.ChatStreamRequest;
+import com.glmapper.ai.api.Model;
+import com.glmapper.ai.spi.ModelCatalog;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
@@ -26,21 +28,31 @@ public class StreamChatController {
     private final AgentSessionRuntime runtime;
     private final OrchestratedChatService orchestratedChatService;
     private final SessionEventBroker eventBroker;
+    private final ModelCatalog modelCatalog;
 
     public StreamChatController(AgentSessionRuntime runtime,
                                 OrchestratedChatService orchestratedChatService,
-                                SessionEventBroker eventBroker) {
+                                SessionEventBroker eventBroker,
+                                ModelCatalog modelCatalog) {
         this.runtime = runtime;
         this.orchestratedChatService = orchestratedChatService;
         this.eventBroker = eventBroker;
+        this.modelCatalog = modelCatalog;
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamChat(@Valid @RequestBody ChatStreamRequest request) {
         String sessionId = request.sessionId();
         if (sessionId == null || sessionId.isBlank()) {
-            String provider = request.provider() != null ? request.provider() : "anthropic";
-            String modelId = request.modelId() != null ? request.modelId() : "claude-opus-4-6";
+            String provider = request.provider();
+            String modelId = request.modelId();
+            if (provider == null || provider.isBlank() || modelId == null || modelId.isBlank()) {
+                Model defaultModel = modelCatalog.getAll().isEmpty() ? null : modelCatalog.getAll().get(0);
+                if (defaultModel != null) {
+                    if (provider == null || provider.isBlank()) provider = defaultModel.provider();
+                    if (modelId == null || modelId.isBlank()) modelId = defaultModel.id();
+                }
+            }
             sessionId = runtime.createSession(new CreateSessionCommand(
                     request.namespace(), request.projectKey(), null,
                     provider, modelId, request.systemPrompt()));

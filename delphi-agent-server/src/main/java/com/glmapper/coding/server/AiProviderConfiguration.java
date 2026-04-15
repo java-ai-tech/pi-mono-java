@@ -46,45 +46,16 @@ public class AiProviderConfiguration {
     }
 
     @Bean
-    public ModelCatalog modelCatalog() {
+    public ModelCatalog modelCatalog(PiAgentProperties properties) {
         ModelCatalog catalog = new ModelCatalog();
-
-        catalog.register(new Model(
-                "deepseek-chat", "deepseek-chat",
-                "spring-ai-deepseek", "deepseek",
-                "https://api.deepseek.com",
-                false, List.of("text"),
-                new Model.CostModel(0, 0, 0, 0),
-                64000, 8192
-        ));
-
-        catalog.register(new Model(
-                "deepseek-reasoner", "deepseek-reasoner",
-                "spring-ai-deepseek", "deepseek",
-                "https://api.deepseek.com",
-                true, List.of("text"),
-                new Model.CostModel(0, 0, 0, 0),
-                64000, 8192
-        ));
-
-        catalog.register(new Model(
-                "glm-4", "GLM-4",
-                "spring-ai-zhipuai", "zhipuai",
-                "https://open.bigmodel.cn/api/paas/v4",
-                false, List.of("text", "image"),
-                new Model.CostModel(0, 0, 0, 0),
-                128000, 4096
-        ));
-
-        catalog.register(new Model(
-                "glm-4-flash", "GLM-4-Flash",
-                "spring-ai-zhipuai", "zhipuai",
-                "https://open.bigmodel.cn/api/paas/v4",
-                false, List.of("text", "image"),
-                new Model.CostModel(0, 0, 0, 0),
-                128000, 4096
-        ));
-
+        for (PiAgentProperties.ModelConfig m : properties.models()) {
+            catalog.register(new Model(
+                    m.id(), m.name(), m.api(), m.provider(), m.baseUrl(),
+                    m.reasoning(), m.input(),
+                    new Model.CostModel(0, 0, 0, 0),
+                    m.contextWindow(), m.maxTokens()
+            ));
+        }
         return catalog;
     }
 

@@ -14,21 +14,18 @@ import java.util.List;
 @Configuration
 public class ApiKeyBridgeConfiguration {
 
-    private static final List<String> API_KEY_NAMES = List.of(
-            "OPENAI_API_KEY",
-            "DEEPSEEK_API_KEY",
-            "ZHIPUAI_API_KEY"
-    );
-
     private final Environment environment;
+    private final PiAgentProperties properties;
 
-    public ApiKeyBridgeConfiguration(Environment environment) {
+    public ApiKeyBridgeConfiguration(Environment environment, PiAgentProperties properties) {
         this.environment = environment;
+        this.properties = properties;
     }
 
     @PostConstruct
     void bridgeApiKeys() {
-        for (String key : API_KEY_NAMES) {
+        List<String> keyNames = properties.apiKeys() != null ? properties.apiKeys() : List.of();
+        for (String key : keyNames) {
             if (System.getenv(key) != null || System.getProperty(key) != null) {
                 continue;
             }

@@ -31,6 +31,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.concurrent.CopyOnWriteArrayList;
 import java.util.function.Consumer;
 
+import static com.glmapper.agent.core.AgentConstants.DEFAULT_NAMESPACE;
+
 @Service
 public class AgentSessionRuntime {
     private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
@@ -89,7 +91,7 @@ public class AgentSessionRuntime {
 
         SessionDocument session = new SessionDocument();
         String ns = command.namespace();
-        session.setNamespace(ns == null || ns.isBlank() ? "default" : ns);
+        session.setNamespace(ns == null || ns.isBlank() ? DEFAULT_NAMESPACE : ns);
         session.setProjectKey(command.projectKey());
         session.setSessionName(command.sessionName());
         session.setModelProvider(model.provider());
@@ -383,7 +385,7 @@ public class AgentSessionRuntime {
 
         Agent agent = buildAgentFromSession(savedFork, path);
         String forkId = savedFork.getId();
-        String forkNs = savedFork.getNamespace() == null || savedFork.getNamespace().isBlank() ? "default" : savedFork.getNamespace();
+        String forkNs = savedFork.getNamespace() == null || savedFork.getNamespace().isBlank() ? DEFAULT_NAMESPACE : savedFork.getNamespace();
         lifecycleManager.getOrCreate(
                 forkId,
                 forkNs,
@@ -497,7 +499,7 @@ public class AgentSessionRuntime {
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
         String sessionNs = session.getNamespace();
         if (sessionNs == null || sessionNs.isBlank()) {
-            sessionNs = "default";
+            sessionNs = DEFAULT_NAMESPACE;
         }
         if (!sessionNs.equals(namespace)) {
             throw new IllegalArgumentException("Namespace mismatch: session belongs to " + sessionNs);
@@ -531,7 +533,7 @@ public class AgentSessionRuntime {
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
         List<SessionEntryDocument> entries = entryRepository.findBySessionIdOrderByTimestampAsc(sessionId);
         List<SessionEntryDocument> path = resolvePathEntries(entries, session.getHeadEntryId());
-        String namespace = session.getNamespace() == null || session.getNamespace().isBlank() ? "default" : session.getNamespace();
+        String namespace = session.getNamespace() == null || session.getNamespace().isBlank() ? DEFAULT_NAMESPACE : session.getNamespace();
         Agent[] holder = new Agent[1];
         return lifecycleManager.getOrCreate(
                 sessionId,
@@ -979,7 +981,7 @@ public class AgentSessionRuntime {
 
         if (tokenOverflow || messageOverflow) {
             int keepCount = tokenOverflow ? Math.max(10, agent.state().messages().size() / 4) : 20;
-            String namespace = session.getNamespace() == null || session.getNamespace().isBlank() ? "default" : session.getNamespace();
+            String namespace = session.getNamespace() == null || session.getNamespace().isBlank() ? DEFAULT_NAMESPACE : session.getNamespace();
             compact(sessionId, namespace, keepCount);
         }
     }

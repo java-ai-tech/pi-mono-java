@@ -25,6 +25,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 
+import static com.glmapper.agent.core.AgentConstants.DEFAULT_NAMESPACE;
+
 @Service
 public class RpcCommandProcessor {
     private final AgentSessionRuntime runtime;
@@ -138,7 +140,7 @@ public class RpcCommandProcessor {
             Model model = chooseDefaultModel(request.getProvider(), request.getModelId());
             String namespace = requireNamespace(request);
             String projectKey = request.getProjectKey() == null || request.getProjectKey().isBlank()
-                    ? "default"
+                    ? DEFAULT_NAMESPACE
                     : request.getProjectKey();
             String sessionName = request.getSessionName() == null || request.getSessionName().isBlank()
                     ? "session-" + Instant.now().toEpochMilli()

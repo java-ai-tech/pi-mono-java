@@ -15,6 +15,8 @@ import java.util.Optional;
 import java.util.Set;
 import java.util.regex.Pattern;
 
+import static com.glmapper.agent.core.AgentConstants.DEFAULT_NAMESPACE;
+
 @Component
 public class AgentToolFactory {
     private static final Pattern SPLIT_PATTERN = Pattern.compile("[^\\p{IsAlphabetic}\\p{IsDigit}\\p{IsIdeographic}]+");
@@ -31,7 +33,7 @@ public class AgentToolFactory {
     }
 
     public List<AgentTool> createTools(String namespace, String sessionId, boolean includePlanningTool) {
-        String effectiveNamespace = namespace == null || namespace.isBlank() ? "default" : namespace;
+        String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
         String effectiveSessionId = sessionId == null || sessionId.isBlank()
                 ? "chat-" + System.currentTimeMillis()
                 : sessionId;

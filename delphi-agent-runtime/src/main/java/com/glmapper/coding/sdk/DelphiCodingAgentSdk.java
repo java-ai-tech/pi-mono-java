@@ -17,6 +17,8 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 import java.util.function.Consumer;
 
+import static com.glmapper.agent.core.AgentConstants.DEFAULT_NAMESPACE;
+
 @Component
 public class DelphiCodingAgentSdk {
     private final AgentSessionRuntime runtime;
@@ -30,7 +32,7 @@ public class DelphiCodingAgentSdk {
 
         // Normalize namespace: null or blank -> "default"
         String namespace = (options.namespace() == null || options.namespace().isBlank())
-                ? "default" : options.namespace();
+                ? DEFAULT_NAMESPACE : options.namespace();
 
         String sessionId = runtime.createSession(new CreateSessionCommand(
                 namespace,

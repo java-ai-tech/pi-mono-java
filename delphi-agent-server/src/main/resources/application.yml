@@ -19,6 +19,60 @@ pi:
     skills-dirs: ${PI_AGENT_SKILLS_DIRS:./skills,${user.home}/.codex/skills}
     prompts-dirs: ${PI_AGENT_PROMPTS_DIRS:./prompts}
     resources-dirs: ${PI_AGENT_RESOURCES_DIRS:./resources}
+  models:
+    - id: deepseek-chat
+      name: deepseek-chat
+      api: spring-ai-deepseek
+      provider: deepseek
+      base-url: https://api.deepseek.com
+      reasoning: false
+      input: [text]
+      context-window: 64000
+      max-tokens: 8192
+    - id: deepseek-reasoner
+      name: deepseek-reasoner
+      api: spring-ai-deepseek
+      provider: deepseek
+      base-url: https://api.deepseek.com
+      reasoning: true
+      input: [text]
+      context-window: 64000
+      max-tokens: 8192
+    - id: glm-4
+      name: GLM-4
+      api: spring-ai-zhipuai
+      provider: zhipuai
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      reasoning: false
+      input: [text, image]
+      context-window: 128000
+      max-tokens: 4096
+    - id: glm-4-flash
+      name: GLM-4-Flash
+      api: spring-ai-zhipuai
+      provider: zhipuai
+      base-url: https://open.bigmodel.cn/api/paas/v4
+      reasoning: false
+      input: [text, image]
+      context-window: 128000
+      max-tokens: 4096
+  defaults:
+    provider: deepseek
+    model-id: deepseek-chat
+  session:
+    max-sessions: ${PI_SESSION_MAX:2000}
+    idle-ttl-hours: ${PI_SESSION_IDLE_TTL_HOURS:24}
+    reap-interval-minutes: ${PI_SESSION_REAP_MINUTES:5}
+  compaction:
+    context-window-ratio: 0.8
+    max-messages: 60
+    default-keep-count: 20
+  planning:
+    timeout-seconds: ${PI_PLANNING_TIMEOUT:45}
+  api-keys:
+    - OPENAI_API_KEY
+    - DEEPSEEK_API_KEY
+    - ZHIPUAI_API_KEY
 
 management:
   endpoints:
