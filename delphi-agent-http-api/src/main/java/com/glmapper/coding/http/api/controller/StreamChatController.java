@@ -1,158 +1,184 @@
 package com.glmapper.coding.http.api.controller;
 
-import com.glmapper.agent.core.*;
-import com.glmapper.ai.api.*;
-import com.glmapper.ai.spi.AiRuntime;
-import com.glmapper.ai.spi.ModelCatalog;
-import com.glmapper.coding.core.catalog.SkillInfo;
-import com.glmapper.coding.core.catalog.SkillsResolver;
-import com.glmapper.coding.core.execution.ExecutionBackend;
-import com.glmapper.coding.core.execution.ExecutionContext;
-import com.glmapper.coding.core.tools.SkillAgentTool;
-import com.glmapper.coding.core.tools.TaskPlanningTool;
-import com.glmapper.coding.http.api.dto.StreamChatRequest;
+import com.glmapper.agent.core.AgentEvent;
+import com.glmapper.ai.api.ThinkingLevel;
+import com.glmapper.coding.core.domain.CreateSessionCommand;
+import com.glmapper.coding.core.orchestration.OrchestratedChatService;
+import com.glmapper.coding.core.service.AgentSessionRuntime;
+import com.glmapper.coding.http.api.config.SessionEventBroker;
+import com.glmapper.coding.http.api.dto.ChatStreamRequest;
 import jakarta.validation.Valid;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.*;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
 import java.io.IOException;
-import java.util.ArrayList;
-import java.util.List;
+import java.util.HashMap;
 import java.util.Map;
+import java.util.concurrent.CompletableFuture;
 
 @RestController
 @RequestMapping("/api/chat")
 public class StreamChatController {
-    private final AiRuntime aiRuntime;
-    private final ModelCatalog modelCatalog;
-    private final SkillsResolver skillsResolver;
-    private final ExecutionBackend executionBackend;
+    private final AgentSessionRuntime runtime;
+    private final OrchestratedChatService orchestratedChatService;
+    private final SessionEventBroker eventBroker;
 
-    public StreamChatController(AiRuntime aiRuntime, ModelCatalog modelCatalog,
-                                SkillsResolver skillsResolver, ExecutionBackend executionBackend) {
-        this.aiRuntime = aiRuntime;
-        this.modelCatalog = modelCatalog;
-        this.skillsResolver = skillsResolver;
-        this.executionBackend = executionBackend;
+    public StreamChatController(AgentSessionRuntime runtime,
+                                OrchestratedChatService orchestratedChatService,
+                                SessionEventBroker eventBroker) {
+        this.runtime = runtime;
+        this.orchestratedChatService = orchestratedChatService;
+        this.eventBroker = eventBroker;
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
-    public SseEmitter streamChat(@Valid @RequestBody StreamChatRequest request) {
+    public SseEmitter streamChat(@Valid @RequestBody ChatStreamRequest request) {
+        String sessionId = request.sessionId();
+        if (sessionId == null || sessionId.isBlank()) {
+            String provider = request.provider() != null ? request.provider() : "anthropic";
+            String modelId = request.modelId() != null ? request.modelId() : "claude-opus-4-6";
+            sessionId = runtime.createSession(new CreateSessionCommand(
+                    request.namespace(), request.projectKey(), null,
+                    provider, modelId, request.systemPrompt()));
+            eventBroker.publish(sessionId, "session_created", Map.of("sessionId", sessionId));
+        }
+
+        String finalSessionId = sessionId;
+
+        // Command routing
+        if (request.command() != null) {
+            SseEmitter emitter = new SseEmitter(30_000L);
+            try {
+                Object ackData = handleCommand(request, finalSessionId);
+                emitter.send(SseEmitter.event().name("ack").data(ackData));
+                emitter.complete();
+            } catch (Exception e) {
+                emitter.completeWithError(e);
+            }
+            return emitter;
+        }
+
+        // Prompt mode
         SseEmitter emitter = new SseEmitter(300_000L);
 
-        try {
-            Model model = modelCatalog.get(request.provider(), request.modelId())
-                    .orElseThrow(() -> new IllegalArgumentException(
-                            "Model not found: " + request.provider() + "/" + request.modelId()));
-
-            Agent agent = new Agent(aiRuntime, model, AgentOptions.defaults());
-            agent.state().systemPrompt(request.systemPrompt() != null ? request.systemPrompt() : "");
-
-            // Build execution context for skill tools
-            String conversationId = request.sessionId() != null && !request.sessionId().isBlank()
-                    ? request.sessionId()
-                    : "chat-" + System.currentTimeMillis();
-            ExecutionContext execCtx = new ExecutionContext(request.namespace(), conversationId, null);
-
-            // Resolve skills for the namespace (public + namespace-specific)
-            List<AgentTool> tools = new ArrayList<>();
-            tools.add(new TaskPlanningTool());
-
-            // Convert namespace-visible skills into executable tools
-            List<SkillInfo> visibleSkills = skillsResolver.resolveSkills(request.namespace());
-            for (SkillInfo skill : visibleSkills) {
-                tools.add(new SkillAgentTool(skill, executionBackend, execCtx));
-            }
-
-            agent.state().tools(tools);
-
-            // Track last emitted text length per turn to compute delta
-            final int[] lastTextLen = {0};
-
-            agent.subscribe(event -> {
-                try {
-                    if (event instanceof AgentEvent.AgentStart) {
-                        emitter.send(SseEmitter.event().name("agent_start").data(Map.of("type", "agent_start")));
-                    } else if (event instanceof AgentEvent.TurnStart) {
-                        emitter.send(SseEmitter.event().name("turn_start").data(Map.of("type", "turn_start")));
-                    } else if (event instanceof AgentEvent.MessageStart start) {
-                        String role = start.message().role();
-                        if ("assistant".equals(role)) {
-                            lastTextLen[0] = 0; // reset for new assistant message
-                        }
-                        emitter.send(SseEmitter.event().name("message_start")
-                                .data(Map.of("type", "message_start", "role", role)));
-                    } else if (event instanceof AgentEvent.MessageUpdate update) {
-                        if (update.message() instanceof AgentAssistantMessage assistant) {
-                            String fullText = extractText(assistant.content());
-                            if (fullText.length() > lastTextLen[0]) {
-                                String delta = fullText.substring(lastTextLen[0]);
-                                lastTextLen[0] = fullText.length();
-                                emitter.send(SseEmitter.event().name("text")
-                                        .data(Map.of("type", "text", "delta", delta)));
-                            }
-                        }
-                    } else if (event instanceof AgentEvent.MessageEnd end) {
-                        if (end.message() instanceof AgentAssistantMessage assistant) {
-                            String text = extractText(assistant.content());
-                            emitter.send(SseEmitter.event().name("message_end")
-                                    .data(Map.of("type", "message_end", "role", "assistant", "text", text)));
-                        }
-                    } else if (event instanceof AgentEvent.ToolExecutionStart toolStart) {
-                        emitter.send(SseEmitter.event().name("tool_start")
-                                .data(Map.of("type", "tool_start", "toolName", toolStart.toolName(),
-                                        "toolCallId", toolStart.toolCallId())));
-                    } else if (event instanceof AgentEvent.ToolExecutionEnd toolEnd) {
-                        String resultText = extractText(toolEnd.result().content());
-                        emitter.send(SseEmitter.event().name("tool_end")
-                                .data(Map.of("type", "tool_end", "toolName", toolEnd.toolName(),
-                                        "toolCallId", toolEnd.toolCallId(),
-                                        "result", resultText != null ? resultText : "",
-                                        "isError", toolEnd.isError())));
-                    } else if (event instanceof AgentEvent.TurnEnd) {
-                        emitter.send(SseEmitter.event().name("turn_end").data(Map.of("type", "turn_end")));
-                    } else if (event instanceof AgentEvent.AgentEnd) {
-                        emitter.send(SseEmitter.event().name("done").data(Map.of("type", "done")));
-                        emitter.complete();
-                    }
-                } catch (IOException e) {
-                    emitter.completeWithError(e);
-                }
-            });
-
-            agent.prompt(request.prompt()).whenComplete((result, throwable) -> {
-                if (throwable != null) {
-                    try {
-                        emitter.send(SseEmitter.event().name("error")
-                                .data(Map.of("type", "error", "message", throwable.getMessage())));
-                    } catch (IOException ignored) {
-                    }
-                    emitter.completeWithError(throwable);
-                }
-            });
-        } catch (Exception e) {
-            try {
-                emitter.send(SseEmitter.event().name("error")
-                        .data(Map.of("type", "error", "message", "初始化失败: " + e.getMessage())));
-            } catch (IOException ignored) {
-            }
-            emitter.completeWithError(e);
+        if ("orchestrated".equals(request.mode())) {
+            CompletableFuture.runAsync(() -> {
+                orchestratedChatService.stream(
+                        request.namespace(), request.prompt(),
+                        request.provider(), request.modelId(),
+                        request.systemPrompt(), finalSessionId,
+                        (eventName, data) -> {
+                            try { emitter.send(SseEmitter.event().name(eventName).data(data)); }
+                            catch (IOException e) { emitter.completeWithError(e); }
+                        });
+                emitter.complete();
+            }).exceptionally(ex -> { emitter.completeWithError(ex); return null; });
+            return emitter;
         }
 
-        return emitter;
+        // Agent mode (default)
+        AutoCloseable subscription = runtime.subscribeEvents(finalSessionId, request.namespace(),
+                event -> eventBroker.publish(finalSessionId, "agent_event", mapAgentEvent(event)));
+
+        SseEmitter sessionEmitter = eventBroker.register(finalSessionId);
+        Runnable cleanup = () -> { try { subscription.close(); } catch (Exception ignored) {} };
+        sessionEmitter.onCompletion(cleanup);
+        sessionEmitter.onTimeout(cleanup);
+        sessionEmitter.onError(e -> cleanup.run());
+
+        runtime.prompt(finalSessionId, request.namespace(), request.prompt())
+                .whenComplete((r, ex) -> {
+                    if (ex != null) {
+                        try {
+                            eventBroker.publish(finalSessionId, "error",
+                                    Map.of("type", "error", "message", ex.getMessage()));
+                        } catch (Exception ignored) {}
+                    }
+                });
+        return sessionEmitter;
     }
 
-    private String extractText(List<ContentBlock> content) {
-        if (content == null || content.isEmpty()) return "";
-        StringBuilder sb = new StringBuilder();
-        for (ContentBlock block : content) {
-            if (block instanceof TextContent text) {
-                if (text.text() != null) {
-                    sb.append(text.text());
-                }
+    private Object handleCommand(ChatStreamRequest request, String sessionId) {
+        String ns = request.namespace();
+        return switch (request.command()) {
+            case "steer" -> {
+                runtime.steer(sessionId, ns, request.prompt());
+                yield Map.of("command", "steer");
             }
+            case "abort" -> {
+                runtime.abort(sessionId, ns);
+                yield Map.of("command", "abort");
+            }
+            case "compact" -> {
+                runtime.compact(sessionId, ns, keepFromArgs(request.commandArgs()));
+                yield Map.of("command", "compact");
+            }
+            case "fork" -> {
+                String forkId = runtime.forkSession(sessionId, ns,
+                        entryIdFromArgs(request.commandArgs()), null);
+                yield Map.of("command", "fork", "forkSessionId", forkId);
+            }
+            case "navigate" -> {
+                runtime.navigateTree(sessionId, ns, entryIdFromArgs(request.commandArgs()));
+                yield Map.of("command", "navigate");
+            }
+            case "set_model" -> {
+                runtime.setModel(sessionId, ns,
+                        providerFromArgs(request.commandArgs()),
+                        modelIdFromArgs(request.commandArgs()));
+                yield Map.of("command", "set_model");
+            }
+            case "set_thinking" -> {
+                runtime.setThinkingLevel(sessionId, ns,
+                        ThinkingLevel.valueOf(levelFromArgs(request.commandArgs())));
+                yield Map.of("command", "set_thinking");
+            }
+            case "continue" -> {
+                runtime.cont(sessionId, ns);
+                yield Map.of("command", "continue");
+            }
+            default -> throw new IllegalArgumentException("Unknown command: " + request.command());
+        };
+    }
+
+    private Map<String, Object> mapAgentEvent(AgentEvent event) {
+        Map<String, Object> payload = new HashMap<>();
+        payload.put("type", event.getClass().getSimpleName());
+
+        if (event instanceof AgentEvent.MessageStart messageStart) {
+            payload.put("role", messageStart.message().role());
+        } else if (event instanceof AgentEvent.MessageEnd messageEnd) {
+            payload.put("role", messageEnd.message().role());
+        } else if (event instanceof AgentEvent.ToolExecutionStart toolExecutionStart) {
+            payload.put("toolCallId", toolExecutionStart.toolCallId());
+            payload.put("toolName", toolExecutionStart.toolName());
+        } else if (event instanceof AgentEvent.ToolExecutionEnd toolExecutionEnd) {
+            payload.put("toolCallId", toolExecutionEnd.toolCallId());
+            payload.put("toolName", toolExecutionEnd.toolName());
+            payload.put("isError", toolExecutionEnd.isError());
         }
-        return sb.toString();
+
+        return payload;
+    }
+
+    private Integer keepFromArgs(Map<String, Object> args) {
+        return args == null ? null : (Integer) args.get("keep");
+    }
+
+    private String entryIdFromArgs(Map<String, Object> args) {
+        return args == null ? null : (String) args.get("entryId");
+    }
+
+    private String providerFromArgs(Map<String, Object> args) {
+        return args == null ? null : (String) args.get("provider");
+    }
+
+    private String modelIdFromArgs(Map<String, Object> args) {
+        return args == null ? null : (String) args.get("modelId");
+    }
+
+    private String levelFromArgs(Map<String, Object> args) {
+        return args == null ? "OFF" : (String) args.getOrDefault("level", "OFF");
     }
 }
