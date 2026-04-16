@@ -16,6 +16,9 @@ import com.glmapper.coding.core.mongo.SessionDocument;
 import com.glmapper.coding.core.mongo.SessionEntryDocument;
 import com.glmapper.coding.core.mongo.SessionEntryRepository;
 import com.glmapper.coding.core.mongo.SessionRepository;
+import com.glmapper.coding.core.tenant.AuditService;
+import com.glmapper.coding.core.tenant.UsageMeteringService;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -49,6 +52,12 @@ public class AgentSessionRuntime {
     private final TokenEstimator tokenEstimator;
 
     private final Map<String, List<Consumer<AgentEvent>>> eventListeners = new ConcurrentHashMap<>();
+
+    @Autowired(required = false)
+    private AuditService auditService;
+
+    @Autowired(required = false)
+    private UsageMeteringService usageMeteringService;
 
     public AgentSessionRuntime(
             SessionRepository sessionRepository,
@@ -119,6 +128,12 @@ public class AgentSessionRuntime {
                 },
                 () -> holder[0].subscribe(event -> dispatchEvent(id, event))
         );
+
+        if (auditService != null) {
+            auditService.record(ns2, null, id, "session_create",
+                    Map.of("modelProvider", saved.getModelProvider(), "modelId", saved.getModelId()));
+        }
+
         return id;
     }
 
@@ -134,6 +149,16 @@ public class AgentSessionRuntime {
                 if (error == null) {
                     persistConversation(sessionId, agent.state().messages());
                     maybeAutoCompact(sessionId, agent);
+
+                    // Record usage metering and audit for the prompt
+                    Usage lastUsage = extractLastAssistantUsage(agent.state().messages());
+                    if (usageMeteringService != null && lastUsage != null) {
+                        usageMeteringService.recordPromptUsage(namespace, lastUsage);
+                    }
+                    if (auditService != null) {
+                        auditService.record(namespace, null, sessionId, "prompt",
+                                Map.of("text", text.length() > 200 ? text.substring(0, 200) : text));
+                    }
                 }
             });
         });
@@ -175,6 +200,10 @@ public class AgentSessionRuntime {
         lifecycleManager.touch(sessionId);
         getOrCreateLiveAgent(sessionId).abort();
         promptQueue.cancel(sessionId);
+
+        if (auditService != null) {
+            auditService.record(namespace, null, sessionId, "abort", Map.of());
+        }
     }
 
     public void setModel(String sessionId, String namespace, String provider, String modelId) {
@@ -392,6 +421,12 @@ public class AgentSessionRuntime {
                 () -> agent,
                 () -> agent.subscribe(event -> dispatchEvent(forkId, event))
         );
+
+        if (auditService != null) {
+            auditService.record(namespace, null, forkId, "session_fork",
+                    Map.of("sourceSessionId", sessionId, "entryId", entryId != null ? entryId : ""));
+        }
+
         return forkId;
     }
 
@@ -487,6 +522,11 @@ public class AgentSessionRuntime {
 
         String compactionEntryId = persistCompactionEntry(sessionId, older.size(), recent.size(), summary, strategy);
         persistConversation(sessionId, compacted, true, compactionEntryId);
+
+        if (auditService != null) {
+            auditService.record(namespace, null, sessionId, "compact",
+                    Map.of("olderMessages", older.size(), "keptMessages", recent.size()));
+        }
     }
 
 
@@ -1003,6 +1043,19 @@ public class AgentSessionRuntime {
             throw new IllegalArgumentException("Model not found: " + provider + "/" + modelId);
         }
         return model.get();
+    }
+
+    /**
+     * Extracts the Usage from the last assistant message in the list.
+     */
+    private Usage extractLastAssistantUsage(List<AgentMessage> messages) {
+        for (int i = messages.size() - 1; i >= 0; i--) {
+            AgentMessage msg = messages.get(i);
+            if (msg instanceof AgentAssistantMessage assistant && assistant.usage() != null) {
+                return assistant.usage();
+            }
+        }
+        return null;
     }
 
     /**

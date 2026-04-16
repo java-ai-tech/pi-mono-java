@@ -21,6 +21,7 @@ import com.glmapper.ai.api.AssistantMessageEvent;
 import com.glmapper.ai.api.TextContent;
 import java.util.List;
 import java.util.concurrent.atomic.AtomicInteger;
+import com.glmapper.agent.core.NamespaceValidator;
 
 @RestController
 @RequestMapping("/api/chat")
@@ -42,6 +43,7 @@ public class StreamChatController {
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
     public SseEmitter streamChat(@Valid @RequestBody ChatStreamRequest request) {
+        NamespaceValidator.validate(request.namespace());
         String sessionId = request.sessionId();
         if (sessionId == null || sessionId.isBlank()) {
             String provider = request.provider();

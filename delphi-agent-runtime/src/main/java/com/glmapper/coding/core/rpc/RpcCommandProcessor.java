@@ -1,5 +1,6 @@
 package com.glmapper.coding.core.rpc;
 
+import com.glmapper.agent.core.NamespaceValidator;
 import com.glmapper.agent.core.QueueMode;
 import com.glmapper.ai.api.Model;
 import com.glmapper.ai.api.ThinkingLevel;
@@ -383,7 +384,7 @@ public class RpcCommandProcessor {
         if (namespace == null || namespace.isBlank()) {
             throw new IllegalArgumentException("namespace is required for command: " + request.getType());
         }
-        validateNoPathTraversal("namespace", namespace);
+        NamespaceValidator.validate(namespace);
         return namespace;
     }
 

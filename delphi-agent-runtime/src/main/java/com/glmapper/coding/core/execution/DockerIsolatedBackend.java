@@ -7,6 +7,9 @@ import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
+import com.glmapper.coding.core.tenant.TenantQuota;
+import com.glmapper.coding.core.tenant.TenantQuotaManager;
+
 import java.io.BufferedReader;
 import java.io.IOException;
 import java.io.InputStreamReader;
@@ -29,6 +32,9 @@ public class DockerIsolatedBackend implements ExecutionBackend {
     private final long cpuQuota;
     private final String memoryLimit;
     private final int pidsLimit;
+
+    @Autowired(required = false)
+    private TenantQuotaManager tenantQuotaManager;
 
     @Autowired
     public DockerIsolatedBackend(
@@ -124,6 +130,18 @@ public class DockerIsolatedBackend implements ExecutionBackend {
 
     String[] buildDockerCommand(ExecutionContext context, String command, ExecutionOptions options) {
         Path workspace = getWorkspacePath(context.namespace(), context.sessionId());
+
+        // Resolve per-tenant quotas, falling back to instance defaults
+        long effectiveCpuQuota = this.cpuQuota;
+        String effectiveMemoryLimit = this.memoryLimit;
+        int effectivePidsLimit = this.pidsLimit;
+        if (tenantQuotaManager != null) {
+            TenantQuota tenantQuota = tenantQuotaManager.resolve(context.namespace());
+            effectiveCpuQuota = tenantQuota.cpuQuota();
+            effectiveMemoryLimit = tenantQuota.memoryLimit();
+            effectivePidsLimit = tenantQuota.pidsLimit();
+        }
+
         List<String> cmd = new ArrayList<>();
         cmd.add("docker");
         cmd.add("run");
@@ -134,11 +152,11 @@ public class DockerIsolatedBackend implements ExecutionBackend {
         cmd.add("65534:65534");
         cmd.add("--read-only");
         cmd.add("--memory");
-        cmd.add(memoryLimit);
+        cmd.add(effectiveMemoryLimit);
         cmd.add("--cpu-quota");
-        cmd.add(String.valueOf(cpuQuota));
+        cmd.add(String.valueOf(effectiveCpuQuota));
         cmd.add("--pids-limit");
-        cmd.add(String.valueOf(pidsLimit));
+        cmd.add(String.valueOf(effectivePidsLimit));
         cmd.add("--tmpfs");
         cmd.add("/tmp:rw,noexec,nosuid,size=64m");
         cmd.add("-v");

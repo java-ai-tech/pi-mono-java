@@ -73,6 +73,29 @@ pi:
     - OPENAI_API_KEY
     - DEEPSEEK_API_KEY
     - ZHIPUAI_API_KEY
+  rate-limit:
+    enabled: true
+    default-rpm: 60
+  quota:
+    enabled: true
+    defaults:
+      max-concurrent-sessions: 50
+      daily-token-limit: 1000000
+      cpu-quota: 50000
+      memory-limit: 256m
+      pids-limit: 100
+    overrides:
+      premium-tenant:
+        max-concurrent-sessions: 200
+        daily-token-limit: 10000000
+        cpu-quota: 100000
+        memory-limit: 512m
+        pids-limit: 200
+  audit:
+    enabled: true
+  metering:
+    enabled: true
+    flush-interval-seconds: 30
 
 management:
   endpoints:

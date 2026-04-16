@@ -6,6 +6,7 @@ import com.glmapper.ai.spi.AiRuntime;
 import com.glmapper.ai.spi.ApiProvider;
 import com.glmapper.ai.spi.ApiProviderRegistry;
 import com.glmapper.ai.spi.ModelCatalog;
+import com.glmapper.coding.core.config.PiAgentProperties;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.api.OpenAiApi;
 import org.springframework.ai.zhipuai.ZhiPuAiChatModel;

@@ -1,5 +1,6 @@
 package com.glmapper.coding.server;
 
+import com.glmapper.coding.core.config.PiAgentProperties;
 import org.springframework.context.annotation.Configuration;
 import org.springframework.core.env.Environment;
 
