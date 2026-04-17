@@ -28,7 +28,7 @@ public class AgentToolFactory {
 
     /**
      * Create all available tools for a session, including all namespace-visible skills.
-     * Tool selection is delegated entirely to the LLM.
+     * Tool selection is delegated entirely to the LLM via system prompt constraints.
      */
     public List<AgentTool> createTools(String namespace, String sessionId, boolean includePlanningTool) {
         String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
@@ -51,7 +51,6 @@ public class AgentToolFactory {
 
     /**
      * Create tools for the planning phase — includes TaskPlanningTool + all skills.
-     * The LLM decides which tools to use during planning.
      */
     public List<AgentTool> createPlanningTools(String namespace, String sessionId, String taskText) {
         return createTools(namespace, sessionId, true);
@@ -59,7 +58,6 @@ public class AgentToolFactory {
 
     /**
      * Create tools for the execution phase — all skills, no TaskPlanningTool.
-     * The LLM decides which tools to use during execution.
      */
     public List<AgentTool> createExecutionTools(String namespace, String sessionId, String taskText) {
         return createTools(namespace, sessionId, false);

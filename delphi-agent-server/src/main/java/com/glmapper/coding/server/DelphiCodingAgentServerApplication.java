@@ -8,7 +8,7 @@ import org.springframework.scheduling.annotation.EnableScheduling;
 
 @SpringBootApplication(scanBasePackages = "com.glmapper")
 @EnableMongoRepositories(basePackages = "com.glmapper.coding.core.mongo")
-@ConfigurationPropertiesScan
+@ConfigurationPropertiesScan(basePackages = {"com.glmapper.coding.server", "com.glmapper.coding.core.config"})
 @EnableScheduling
 public class DelphiCodingAgentServerApplication {
     public static void main(String[] args) {

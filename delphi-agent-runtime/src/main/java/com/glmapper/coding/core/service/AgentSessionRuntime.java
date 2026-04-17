@@ -50,6 +50,7 @@ public class AgentSessionRuntime {
     private final SessionPromptQueue promptQueue;
     private final BranchSummarizer branchSummarizer;
     private final TokenEstimator tokenEstimator;
+    private final AgentToolFactory agentToolFactory;
 
     private final Map<String, List<Consumer<AgentEvent>>> eventListeners = new ConcurrentHashMap<>();
 
@@ -67,7 +68,8 @@ public class AgentSessionRuntime {
             ExtensionRuntime extensionRuntime,
             SessionLifecycleManager lifecycleManager,
             SessionPromptQueue promptQueue,
-            BranchSummarizer branchSummarizer
+            BranchSummarizer branchSummarizer,
+            AgentToolFactory agentToolFactory
     ) {
         this.sessionRepository = sessionRepository;
         this.entryRepository = entryRepository;
@@ -77,6 +79,7 @@ public class AgentSessionRuntime {
         this.lifecycleManager = lifecycleManager;
         this.promptQueue = promptQueue;
         this.branchSummarizer = branchSummarizer;
+        this.agentToolFactory = agentToolFactory;
         this.tokenEstimator = new TokenEstimator();
         this.objectMapper = new ObjectMapper();
 
@@ -589,7 +592,15 @@ public class AgentSessionRuntime {
     private Agent buildAgentFromSession(SessionDocument session, List<SessionEntryDocument> entries) {
         Model model = resolveModel(session.getModelProvider(), session.getModelId());
         Agent agent = new Agent(aiRuntime, model, AgentOptions.defaults());
-        agent.state().systemPrompt(session.getSystemPrompt() == null ? "" : session.getSystemPrompt());
+
+        // Register all namespace-visible skills as tools
+        String ns = session.getNamespace() == null || session.getNamespace().isBlank()
+                ? AgentConstants.DEFAULT_NAMESPACE : session.getNamespace();
+        List<AgentTool> tools = agentToolFactory.createTools(ns, session.getId(), false);
+        agent.state().tools(tools);
+
+        // Build system prompt: user prompt + tool usage guidance
+        agent.state().systemPrompt(buildSystemPrompt(session.getSystemPrompt(), tools));
 
 
         QueueMode steering = parseQueueMode(session.getSteeringMode());
@@ -607,6 +618,38 @@ public class AgentSessionRuntime {
         List<AgentMessage> restoredMessages = deserializeEntries(entries);
         agent.state().messages(restoredMessages);
         return agent;
+    }
+
+    private String buildSystemPrompt(String userPrompt, List<AgentTool> tools) {
+        StringBuilder sb = new StringBuilder();
+
+        // User-provided system prompt
+        if (userPrompt != null && !userPrompt.isBlank()) {
+            sb.append(userPrompt.trim()).append("\n\n");
+        }
+
+        // Tool usage guidance
+        if (tools != null && !tools.isEmpty()) {
+            sb.append("## Tool Usage Guidelines\n\n");
+            sb.append("You have access to the following tools. Follow these rules strictly:\n\n");
+            sb.append("1. **Only call a tool when the user's request clearly requires it.** ");
+            sb.append("Do NOT proactively call tools to be helpful — answer directly when you can.\n");
+            sb.append("2. **Never call multiple tools at once unless the user explicitly asks for a multi-step workflow.** ");
+            sb.append("Prefer answering with your own knowledge first.\n");
+            sb.append("3. **Executable tools (marked with [executable]) perform real actions** (deploy, build, run scripts). ");
+            sb.append("Only call them when the user explicitly requests that action.\n");
+            sb.append("4. **Instructional tools (marked with [instructional]) provide guidance and context.** ");
+            sb.append("Use them when the user asks for review, planning, or domain-specific advice.\n\n");
+
+            sb.append("Available tools:\n");
+            for (AgentTool tool : tools) {
+                String type = (tool instanceof com.glmapper.coding.core.tools.SkillAgentTool skillTool
+                        && skillTool.getSkill().isExecutable()) ? "executable" : "instructional";
+                sb.append("- `").append(tool.name()).append("` [").append(type).append("]: ").append(tool.description()).append("\n");
+            }
+        }
+
+        return sb.toString();
     }
 
     private List<AgentMessage> deserializeEntries(List<SessionEntryDocument> entries) {
