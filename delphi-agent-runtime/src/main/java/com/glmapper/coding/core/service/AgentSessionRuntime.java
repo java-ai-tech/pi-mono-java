@@ -6,6 +6,7 @@ import com.glmapper.agent.core.*;
 import com.glmapper.ai.api.*;
 import com.glmapper.ai.spi.AiRuntime;
 import com.glmapper.ai.spi.ModelCatalog;
+import com.glmapper.coding.core.config.PiAgentProperties;
 import com.glmapper.coding.core.domain.CreateSessionCommand;
 import com.glmapper.coding.core.domain.SessionStateSnapshot;
 import com.glmapper.coding.core.domain.SessionStats;
@@ -39,6 +40,9 @@ import static com.glmapper.agent.core.AgentConstants.DEFAULT_NAMESPACE;
 @Service
 public class AgentSessionRuntime {
     private static final TypeReference<Map<String, Object>> MAP_REF = new TypeReference<>() {};
+    private static final double DEFAULT_COMPACTION_CONTEXT_WINDOW_RATIO = 0.8d;
+    private static final int DEFAULT_COMPACTION_MAX_MESSAGES = 60;
+    private static final int DEFAULT_COMPACTION_KEEP_COUNT = 20;
 
     private final SessionRepository sessionRepository;
     private final SessionEntryRepository entryRepository;
@@ -59,6 +63,9 @@ public class AgentSessionRuntime {
 
     @Autowired(required = false)
     private UsageMeteringService usageMeteringService;
+
+    @Autowired(required = false)
+    private PiAgentProperties properties;
 
     public AgentSessionRuntime(
             SessionRepository sessionRepository,
@@ -497,7 +504,7 @@ public class AgentSessionRuntime {
         Agent agent = getOrCreateLiveAgent(sessionId);
         List<AgentMessage> currentMessages = new ArrayList<>(agent.state().messages());
 
-        int keep = keepRecentMessages == null ? 20 : Math.max(1, keepRecentMessages);
+        int keep = keepRecentMessages == null ? compactionDefaultKeepCount() : Math.max(1, keepRecentMessages);
         if (currentMessages.size() <= keep) {
             return;
         }
@@ -596,7 +603,7 @@ public class AgentSessionRuntime {
         // Register all namespace-visible skills as tools
         String ns = session.getNamespace() == null || session.getNamespace().isBlank()
                 ? AgentConstants.DEFAULT_NAMESPACE : session.getNamespace();
-        List<AgentTool> tools = agentToolFactory.createTools(ns, session.getId(), false);
+        List<AgentTool> tools = agentToolFactory.createTools(ns, session.getId());
         agent.state().tools(tools);
 
         // Build system prompt: user prompt + tool usage guidance
@@ -1059,11 +1066,16 @@ public class AgentSessionRuntime {
 
         long estimatedTokens = tokenEstimator.estimateTotal(agent.state().messages());
         int contextWindow = agent.state().model().contextWindow();
-        boolean tokenOverflow = contextWindow > 0 && estimatedTokens > (long)(contextWindow * 0.8);
-        boolean messageOverflow = agent.state().messages().size() >= 60;
+        double contextWindowRatio = compactionContextWindowRatio();
+        int maxMessages = compactionMaxMessages();
+        int defaultKeepCount = compactionDefaultKeepCount();
+        boolean tokenOverflow = contextWindow > 0 && estimatedTokens > (long) (contextWindow * contextWindowRatio);
+        boolean messageOverflow = agent.state().messages().size() >= maxMessages;
 
         if (tokenOverflow || messageOverflow) {
-            int keepCount = tokenOverflow ? Math.max(10, agent.state().messages().size() / 4) : 20;
+            int keepCount = tokenOverflow
+                    ? Math.max(Math.max(10, defaultKeepCount), agent.state().messages().size() / 4)
+                    : defaultKeepCount;
             String namespace = session.getNamespace() == null || session.getNamespace().isBlank() ? DEFAULT_NAMESPACE : session.getNamespace();
             compact(sessionId, namespace, keepCount);
         }
@@ -1108,5 +1120,75 @@ public class AgentSessionRuntime {
     public void persistOrchestrationResult(String sessionId, String namespace, List<AgentMessage> messages) {
         validateNamespace(sessionId, namespace);
         persistConversation(sessionId, messages);
+    }
+
+    /**
+     * Persist one orchestrated turn (user prompt + assistant summary) into the
+     * session main conversation chain so orchestrated mode stays replayable/forkable.
+     */
+    public void persistOrchestrationTurn(String sessionId, String namespace, String userPrompt, String assistantText) {
+        validateNamespace(sessionId, namespace);
+        lifecycleManager.touch(sessionId);
+
+        SessionDocument session = sessionRepository.findById(sessionId)
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + sessionId));
+        Agent agent = getOrCreateLiveAgent(sessionId);
+
+        List<AgentMessage> updated = new ArrayList<>(agent.state().messages());
+        long now = System.currentTimeMillis();
+
+        if (userPrompt != null && !userPrompt.isBlank()) {
+            updated.add(new AgentUserMessage(List.of(new TextContent(userPrompt, null)), now));
+        }
+
+        String finalAssistantText = assistantText == null ? "" : assistantText;
+        Model model = resolveModel(session.getModelProvider(), session.getModelId());
+        updated.add(new AgentAssistantMessage(
+                List.of(new TextContent(finalAssistantText, null)),
+                model.api(),
+                model.provider(),
+                model.id(),
+                Usage.empty(),
+                StopReason.STOP,
+                null,
+                null,
+                now + 1
+        ));
+
+        agent.state().messages(updated);
+        persistConversation(sessionId, updated);
+        maybeAutoCompact(sessionId, agent);
+
+        if (auditService != null) {
+            Map<String, Object> details = new LinkedHashMap<>();
+            details.put("promptLength", userPrompt == null ? 0 : userPrompt.length());
+            details.put("assistantLength", finalAssistantText.length());
+            auditService.record(namespace, null, sessionId, "orchestrated_prompt", details);
+        }
+    }
+
+    private double compactionContextWindowRatio() {
+        if (properties == null || properties.compaction() == null) {
+            return DEFAULT_COMPACTION_CONTEXT_WINDOW_RATIO;
+        }
+        double ratio = properties.compaction().contextWindowRatio();
+        if (ratio <= 0 || ratio > 1) {
+            return DEFAULT_COMPACTION_CONTEXT_WINDOW_RATIO;
+        }
+        return ratio;
+    }
+
+    private int compactionMaxMessages() {
+        if (properties == null || properties.compaction() == null || properties.compaction().maxMessages() <= 0) {
+            return DEFAULT_COMPACTION_MAX_MESSAGES;
+        }
+        return properties.compaction().maxMessages();
+    }
+
+    private int compactionDefaultKeepCount() {
+        if (properties == null || properties.compaction() == null || properties.compaction().defaultKeepCount() <= 0) {
+            return DEFAULT_COMPACTION_KEEP_COUNT;
+        }
+        return properties.compaction().defaultKeepCount();
     }
 }
