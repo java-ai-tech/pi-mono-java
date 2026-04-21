@@ -1,7 +1,10 @@
 package com.glmapper.coding.core.catalog;
 
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Service;
+import org.yaml.snakeyaml.Yaml;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -20,6 +23,7 @@ import java.util.stream.Stream;
 
 @Service
 public class ResourceCatalogService {
+    private static final Logger log = LoggerFactory.getLogger(ResourceCatalogService.class);
     private final String skillsDirsConfig;
     private final String promptsDirsConfig;
     private final String resourcesDirsConfig;
@@ -135,7 +139,8 @@ public class ResourceCatalogService {
         try (Stream<Path> stream = Files.walk(root)) {
             stream.filter(path -> Files.isRegularFile(path) && path.getFileName().toString().equals("SKILL.md"))
                     .forEach(this::readSkill);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to walk skills directory: {}", root, e);
         }
     }
 
@@ -173,7 +178,8 @@ public class ResourceCatalogService {
         try (Stream<Path> stream = Files.walk(root)) {
             stream.filter(path -> Files.isRegularFile(path) && isPromptFile(path.getFileName().toString()))
                     .forEach(this::readPrompt);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to walk prompts directory: {}", root, e);
         }
     }
 
@@ -186,7 +192,8 @@ public class ResourceCatalogService {
                     .filter(path -> !path.getFileName().toString().equals("SKILL.md"))
                     .filter(path -> !isPromptFile(path.getFileName().toString()))
                     .forEach(this::readResource);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to walk resources directory: {}", root, e);
         }
     }
 
@@ -194,14 +201,23 @@ public class ResourceCatalogService {
         try {
             String content = Files.readString(path, StandardCharsets.UTF_8);
             String name = path.getParent() != null ? path.getParent().getFileName().toString() : baseName(path);
-            String description = firstNonEmptyLine(content).orElse("Skill");
-            String entrypoint = extractFrontmatterField(content, "entrypoint");
-            String argsSchema = extractFrontmatterField(content, "args_schema");
+
+            Map<String, Object> frontmatter = parseFrontmatter(content);
+            String entrypoint = stringFromFrontmatter(frontmatter, "entrypoint");
+            String argsSchema = stringFromFrontmatter(frontmatter, "args_schema");
+            long timeoutMs = longFromFrontmatter(frontmatter, "timeout_ms", 0);
+
+            // Prefer explicit description from frontmatter, fall back to first non-empty line
+            String description = stringFromFrontmatter(frontmatter, "description");
+            if (description == null || description.isBlank()) {
+                description = firstNonEmptyLine(content).orElse("Skill");
+            }
+
             SkillInfo skill = new SkillInfo(normalizeName(name), description, path.toAbsolutePath().toString(),
-                    content, entrypoint, argsSchema);
-            // Use absolute path as key to allow same-name skills in different scopes
+                    content, entrypoint, argsSchema, timeoutMs);
             skills.put(path.toAbsolutePath().toString(), skill);
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to read skill file: {}", path, e);
         }
     }
 
@@ -211,7 +227,8 @@ public class ResourceCatalogService {
             String description = firstNonEmptyLine(content).orElse("Prompt template");
             String name = normalizeName(baseName(path));
             prompts.put(name, new PromptTemplateInfo(name, description, path.toAbsolutePath().toString(), content));
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to read prompt file: {}", path, e);
         }
     }
 
@@ -221,7 +238,8 @@ public class ResourceCatalogService {
             String name = normalizeName(baseName(path));
             String type = extension(path.getFileName().toString());
             resources.put(name, new ResourceInfo(name, type, path.toAbsolutePath().toString(), content));
-        } catch (IOException ignored) {
+        } catch (IOException e) {
+            log.warn("Failed to read resource file: {}", path, e);
         }
     }
 
@@ -290,26 +308,60 @@ public class ResourceCatalogService {
         return idx >= 0 ? filename.substring(idx + 1).toLowerCase(Locale.ROOT) : "txt";
     }
 
-    private String extractFrontmatterField(String content, String field) {
+    /**
+     * Parse YAML frontmatter using SnakeYAML for proper multi-line and nested value support.
+     */
+    private Map<String, Object> parseFrontmatter(String content) {
         if (content == null || !content.startsWith("---")) {
-            return null;
+            return Map.of();
         }
-        int endIdx = content.indexOf("---", 3);
+        int endIdx = content.indexOf("\n---", 3);
         if (endIdx < 0) {
+            return Map.of();
+        }
+        String frontmatterYaml = content.substring(3, endIdx).trim();
+        if (frontmatterYaml.isBlank()) {
+            return Map.of();
+        }
+
+        try {
+            Yaml yaml = new Yaml();
+            Object parsed = yaml.load(frontmatterYaml);
+            if (parsed instanceof Map<?, ?> map) {
+                Map<String, Object> result = new LinkedHashMap<>();
+                for (Map.Entry<?, ?> entry : map.entrySet()) {
+                    if (entry.getKey() != null) {
+                        result.put(String.valueOf(entry.getKey()), entry.getValue());
+                    }
+                }
+                return result;
+            }
+        } catch (Exception e) {
+            log.warn("Failed to parse YAML frontmatter, falling back to empty map: {}", e.getMessage());
+        }
+        return Map.of();
+    }
+
+    private String stringFromFrontmatter(Map<String, Object> frontmatter, String key) {
+        Object value = frontmatter.get(key);
+        if (value == null) {
             return null;
         }
-        String frontmatter = content.substring(3, endIdx);
-        for (String line : frontmatter.split("\n")) {
-            String trimmed = line.trim();
-            if (trimmed.startsWith(field + ":")) {
-                String value = trimmed.substring(field.length() + 1).trim();
-                if ((value.startsWith("\"") && value.endsWith("\""))
-                        || (value.startsWith("'") && value.endsWith("'"))) {
-                    value = value.substring(1, value.length() - 1);
-                }
-                return value.isEmpty() ? null : value;
+        String str = String.valueOf(value).trim();
+        return str.isEmpty() ? null : str;
+    }
+
+    private long longFromFrontmatter(Map<String, Object> frontmatter, String key, long defaultValue) {
+        Object value = frontmatter.get(key);
+        if (value instanceof Number num) {
+            return num.longValue();
+        }
+        if (value instanceof String str) {
+            try {
+                return Long.parseLong(str.trim());
+            } catch (NumberFormatException ignored) {
             }
         }
-        return null;
+        return defaultValue;
     }
 }

@@ -63,9 +63,30 @@ public class AgentToolFactory {
         return createTools(namespace, sessionId, false);
     }
 
+    /**
+     * Resolve a single tool by name. Optimized to avoid rebuilding all tools.
+     */
     public Optional<AgentTool> resolveTool(String namespace, String sessionId, String toolName, boolean includePlanningTool) {
-        return createTools(namespace, sessionId, includePlanningTool).stream()
-                .filter(tool -> tool.name().equals(toolName))
-                .findFirst();
+        String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
+        String effectiveSessionId = sessionId == null || sessionId.isBlank()
+                ? "chat-" + System.currentTimeMillis()
+                : sessionId;
+
+        // Check if it's the planning tool
+        if (includePlanningTool && "task_planning".equals(toolName)) {
+            return Optional.of(new TaskPlanningTool());
+        }
+
+        // Extract skill name from tool name (remove "skill_" prefix if present)
+        String skillName = toolName.startsWith("skill_") ? toolName.substring(6) : toolName;
+
+        // Direct lookup via SkillsResolver
+        Optional<SkillInfo> skillOpt = skillsResolver.resolveSkill(effectiveNamespace, skillName);
+        if (skillOpt.isPresent()) {
+            ExecutionContext execCtx = new ExecutionContext(effectiveNamespace, effectiveSessionId, null);
+            return Optional.of(new SkillAgentTool(skillOpt.get(), executionBackend, execCtx));
+        }
+
+        return Optional.empty();
     }
 }

@@ -16,6 +16,7 @@ import com.glmapper.ai.api.TextContent;
 import com.glmapper.ai.spi.AiRuntime;
 import com.glmapper.ai.spi.ModelCatalog;
 import com.glmapper.coding.core.tools.TaskPlanningTool;
+import com.glmapper.coding.core.tools.SkillAgentTool;
 import com.glmapper.coding.core.service.AgentToolFactory;
 import org.springframework.stereotype.Service;
 
@@ -28,6 +29,7 @@ import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.UUID;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 @Service
 public class PlannerService {
@@ -77,8 +79,12 @@ public class PlannerService {
                 : sessionId + "-planner";
 
         List<AgentTool> tools = agentToolFactory.createPlanningTools(namespace, plannerSessionId, userPrompt);
-        Agent agent = new Agent(aiRuntime, model, planningOptions(java.util.Set.of()));
-        agent.state().systemPrompt(buildPlanningSystemPrompt(systemPrompt));
+        Set<String> blockedExecutableTools = tools.stream()
+                .filter(tool -> tool instanceof SkillAgentTool skillTool && skillTool.getSkill().isExecutable())
+                .map(AgentTool::name)
+                .collect(Collectors.toSet());
+        Agent agent = new Agent(aiRuntime, model, planningOptions(blockedExecutableTools));
+        agent.state().systemPrompt(buildPlanningSystemPrompt(systemPrompt, blockedExecutableTools));
         agent.state().tools(tools);
         PlanningEventObserver effectiveObserver = observer == null ? new PlanningEventObserver() { } : observer;
         String[] lastPhase = {""};
@@ -250,13 +256,19 @@ public class PlannerService {
         return steps;
     }
 
-    private String buildPlanningSystemPrompt(String userSystemPrompt) {
+    private String buildPlanningSystemPrompt(String userSystemPrompt, Set<String> blockedExecutableTools) {
         StringBuilder builder = new StringBuilder();
         if (userSystemPrompt != null && !userSystemPrompt.isBlank()) {
             builder.append(userSystemPrompt.trim()).append("\n\n");
         }
         builder.append("You are the planning phase of delphi-agent.\n");
         builder.append("You may use the available tools and skills to understand the task.\n");
+        if (blockedExecutableTools != null && !blockedExecutableTools.isEmpty()) {
+            builder.append("Do not execute tools that perform real actions.\n");
+            builder.append("Executable tools are disabled in planning: ")
+                    .append(String.join(", ", blockedExecutableTools))
+                    .append("\n");
+        }
         builder.append("Your only job is to return a structured execution plan.\n");
         builder.append("Do not execute the whole task directly.\n");
         builder.append("Output valid JSON only, with no markdown fences and no extra commentary.\n");

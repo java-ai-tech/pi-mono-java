@@ -5,6 +5,7 @@ import com.glmapper.agent.core.AgentToolResult;
 import com.glmapper.coding.core.service.AgentToolFactory;
 import org.springframework.stereotype.Service;
 
+import java.util.LinkedHashMap;
 import java.util.Map;
 import java.util.concurrent.CancellationException;
 
@@ -29,17 +30,24 @@ public class SkillStepExecutor implements StepExecutor {
             PlanExecutionObserver observer
     ) {
         String toolName = String.valueOf(step.payload().getOrDefault("toolName", ""));
-        String input = String.valueOf(step.payload().getOrDefault("input", ""));
-        AgentTool tool = agentToolFactory.resolveTool(context.namespace(), context.sessionId(), toolName, false)
+        if (toolName.isBlank()) {
+            return PlanStepResult.failure("Skill step is missing toolName payload");
+        }
+
+        // Normalize toolName: support both "deploy" and "skill_deploy" formats
+        String normalizedToolName = toolName.startsWith("skill_") ? toolName : "skill_" + toolName;
+
+        Map<String, Object> toolArgs = buildToolArgs(step.payload());
+        AgentTool tool = agentToolFactory.resolveTool(context.namespace(), context.sessionId(), normalizedToolName, false)
                 .orElse(null);
 
         if (tool == null) {
-            return PlanStepResult.failure("Skill tool not found: " + toolName);
+            return PlanStepResult.failure("Skill tool not found: " + toolName + " (normalized: " + normalizedToolName + ")");
         }
 
         AgentToolResult result = tool.execute(
                 "skill-step-" + step.id(),
-                Map.of("input", input),
+                toolArgs,
                 ignored -> { },
                 new CancellationException("skill-step")
         ).join();
@@ -51,5 +59,17 @@ public class SkillStepExecutor implements StepExecutor {
                 .reduce("", String::concat);
         observer.onStepOutput(plan, step, text);
         return PlanStepResult.success(text.isBlank() ? step.successCriteria() : text);
+    }
+
+    private Map<String, Object> buildToolArgs(Map<String, Object> payload) {
+        Map<String, Object> args = new LinkedHashMap<>();
+        for (Map.Entry<String, Object> entry : payload.entrySet()) {
+            String key = entry.getKey();
+            if ("toolName".equals(key) || "description".equals(key) || "expectedOutput".equals(key)) {
+                continue;
+            }
+            args.put(key, entry.getValue());
+        }
+        return args;
     }
 }
