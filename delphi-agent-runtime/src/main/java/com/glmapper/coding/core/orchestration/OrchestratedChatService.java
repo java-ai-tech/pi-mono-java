@@ -186,8 +186,7 @@ public class OrchestratedChatService {
                     "index", stepIndex + 1,
                     "total", totalSteps
             ));
-            appendText(sink, assistantText,
-                    "\n[%d/%d] 开始执行：%s\n".formatted(stepIndex + 1, totalSteps, step.title()));
+            assistantText.append("\n[%d/%d] 开始执行：%s\n".formatted(stepIndex + 1, totalSteps, step.title()));
         }
 
         @Override
@@ -201,7 +200,9 @@ public class OrchestratedChatService {
                     "stepId", step.id(),
                     "delta", delta
             ));
-            appendText(sink, assistantText, delta);
+            // Only append to assistantText for final summary, do NOT emit "text" event
+            // to avoid double-rendering on the frontend (step_output + text both append to currentText)
+            assistantText.append(delta);
         }
 
         @Override
@@ -234,8 +235,7 @@ public class OrchestratedChatService {
                     "stepId", step.id(),
                     "summary", result.summary() == null ? "" : result.summary()
             ));
-            appendText(sink, assistantText,
-                    "\n步骤完成：%s\n".formatted(step.title()));
+            assistantText.append("\n步骤完成：%s\n".formatted(step.title()));
         }
 
         @Override
@@ -246,11 +246,10 @@ public class OrchestratedChatService {
                     "stepId", step.id(),
                     "error", result.errorMessage() == null ? "执行失败" : result.errorMessage()
             ));
-            appendText(sink, assistantText,
-                    "\n步骤失败：%s\n原因：%s\n".formatted(
-                            step.title(),
-                            result.errorMessage() == null ? "执行失败" : result.errorMessage()
-                    ));
+            assistantText.append("\n步骤失败：%s\n原因：%s\n".formatted(
+                    step.title(),
+                    result.errorMessage() == null ? "执行失败" : result.errorMessage()
+            ));
         }
     }
 }

@@ -626,14 +626,37 @@
                         setStatus('计划生成完成，开始执行', 'streaming');
                         if (data.steps && currentMessageContent) {
                             const planDiv = document.createElement('div');
+                            planDiv.className = 'execution-plan';
                             planDiv.style.cssText = 'margin:10px 0;padding:10px 12px;background:#f5f7ff;border-radius:8px;border-left:3px solid #667eea;font-size:13px;';
-                            const stepsHtml = (data.steps || []).map((s, i) =>
-                                `<div style="padding:4px 0;border-bottom:1px solid #e8eaf6;">
-                                    <span style="color:#667eea;font-weight:600;">${i+1}.</span> ${escapeHtml(s.title || s.description || '')}
-                                    <span style="color:#999;font-size:11px;margin-left:6px;">[${s.executorType || 'AGENT'}]</span>
-                                </div>`
-                            ).join('');
-                            planDiv.innerHTML = `<div style="font-weight:600;color:#3f51b5;margin-bottom:6px;">📋 执行计划：${escapeHtml(data.goal || '')}</div>${stepsHtml}`;
+
+                            // Create header
+                            const headerDiv = document.createElement('div');
+                            headerDiv.style.cssText = 'font-weight:600;color:#3f51b5;margin-bottom:10px;';
+                            headerDiv.textContent = '📋 执行计划：' + (data.goal || '');
+                            planDiv.appendChild(headerDiv);
+
+                            // Create step items with output containers
+                            (data.steps || []).forEach((s, i) => {
+                                const stepContainer = document.createElement('div');
+                                stepContainer.className = 'plan-step-container';
+                                stepContainer.dataset.stepIndex = i + 1;
+                                stepContainer.style.cssText = 'margin-bottom:8px;';
+
+                                const stepHeader = document.createElement('div');
+                                stepHeader.className = 'plan-step-header';
+                                stepHeader.style.cssText = 'padding:6px 8px;background:#f8f9fa;border-radius:6px;border-left:3px solid #ccc;';
+                                stepHeader.innerHTML = `<span style="color:#999;font-weight:600;">${i+1}.</span> ${escapeHtml(s.title || s.description || '')} <span style="color:#999;font-size:11px;margin-left:6px;">[${s.executorType || 'AGENT'}]</span>`;
+
+                                const stepOutput = document.createElement('div');
+                                stepOutput.className = 'plan-step-output';
+                                stepOutput.dataset.stepIndex = i + 1;
+                                stepOutput.style.cssText = 'margin-left:20px;margin-top:4px;display:none;';
+
+                                stepContainer.appendChild(stepHeader);
+                                stepContainer.appendChild(stepOutput);
+                                planDiv.appendChild(stepContainer);
+                            });
+
                             currentMessageContent.appendChild(planDiv);
                             chatArea.scrollTop = chatArea.scrollHeight;
                         }
@@ -641,51 +664,94 @@
                     case 'execution_started':
                         setStatus(`执行中 (0/${data.totalSteps || '?'})`, 'streaming');
                         break;
-                    case 'step_started':
+                    case 'step_started': {
                         setStatus(`[${data.index}/${data.total}] ${data.title}`, 'streaming');
+                        // Activate the corresponding plan step header (turn green with spinner)
                         if (currentMessageContent) {
-                            const stepDiv = document.createElement('div');
-                            stepDiv.className = 'inline-step';
-                            stepDiv.id = 'inline-step-' + data.index;
-                            stepDiv.style.cssText = 'margin:6px 0;padding:6px 10px;background:#fff3e0;border-radius:6px;border-left:3px solid #ffa726;font-size:13px;';
-                            stepDiv.innerHTML = `<div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;width:12px;height:12px;border-width:2px;"></div><span style="color:#f57c00;font-weight:600;">[${data.index}/${data.total}]</span> ${escapeHtml(data.title)}`;
-                            currentMessageContent.appendChild(stepDiv);
+                            const container = currentMessageContent.querySelector(`.plan-step-container[data-step-index="${data.index}"]`);
+                            if (container) {
+                                const header = container.querySelector('.plan-step-header');
+                                if (header) {
+                                    header.style.background = '#e8f5e9';
+                                    header.style.borderLeftColor = '#43a047';
+                                    header.innerHTML = `<div class="spinner" style="display:inline-block;vertical-align:middle;margin-right:6px;width:12px;height:12px;border-width:2px;"></div><span style="color:#2e7d32;font-weight:600;">${data.index}.</span> ${escapeHtml(data.title)} <span style="color:#999;font-size:11px;margin-left:6px;">执行中</span>`;
+                                }
+                                // Show and reset the output area
+                                const output = container.querySelector('.plan-step-output');
+                                if (output) {
+                                    output.style.display = 'block';
+                                    output.innerHTML = '';
+                                }
+                            }
+                            // Reset currentText for this step
+                            currentText = '';
                             chatArea.scrollTop = chatArea.scrollHeight;
                         }
                         break;
-                    case 'step_output':
+                    }
+                    case 'step_output': {
                         currentText += data.delta;
                         if (currentMessageContent) {
-                            let textNode = currentMessageContent.querySelector('.msg-text');
-                            if (!textNode) {
-                                textNode = document.createElement('div');
-                                textNode.className = 'msg-text';
-                                currentMessageContent.appendChild(textNode);
+                            // Find the active step's output container
+                            const containers = currentMessageContent.querySelectorAll('.plan-step-output[style*="display: block"], .plan-step-output[style*="display:block"]');
+                            const activeOutput = containers[containers.length - 1];
+                            if (activeOutput) {
+                                let textNode = activeOutput.querySelector('.msg-text');
+                                if (!textNode) {
+                                    textNode = document.createElement('div');
+                                    textNode.className = 'msg-text';
+                                    textNode.style.cssText = 'font-size:13px;line-height:1.6;padding:8px;background:#fff;border-radius:6px;border:1px solid #e8e8e8;';
+                                    activeOutput.appendChild(textNode);
+                                }
+                                renderMarkdown(textNode, currentText);
                             }
-                            renderMarkdown(textNode, currentText);
                             chatArea.scrollTop = chatArea.scrollHeight;
                         }
                         break;
+                    }
                     case 'step_completed': {
-                        const steps = currentMessageContent ? currentMessageContent.querySelectorAll('.inline-step') : [];
-                        const lastStep = steps[steps.length - 1];
-                        if (lastStep) {
-                            lastStep.style.background = '#e8f5e9';
-                            lastStep.style.borderLeftColor = '#43a047';
-                            const spinner = lastStep.querySelector('.spinner');
-                            if (spinner) spinner.outerHTML = '✅ ';
+                        if (currentMessageContent && data.stepId) {
+                            // Find step by matching the last active container
+                            const containers = currentMessageContent.querySelectorAll('.plan-step-container');
+                            for (const container of containers) {
+                                const header = container.querySelector('.plan-step-header');
+                                if (header && header.querySelector('.spinner')) {
+                                    const spinner = header.querySelector('.spinner');
+                                    spinner.outerHTML = '✅ ';
+                                    const statusSpan = header.querySelector('span:last-child');
+                                    if (statusSpan && statusSpan.textContent === '执行中') {
+                                        statusSpan.textContent = '已完成';
+                                        statusSpan.style.color = '#2e7d32';
+                                    }
+                                }
+                            }
                         }
                         break;
                     }
                     case 'step_failed': {
-                        const steps = currentMessageContent ? currentMessageContent.querySelectorAll('.inline-step') : [];
-                        const lastStep = steps[steps.length - 1];
-                        if (lastStep) {
-                            lastStep.style.background = '#ffebee';
-                            lastStep.style.borderLeftColor = '#e53935';
-                            const spinner = lastStep.querySelector('.spinner');
-                            if (spinner) spinner.outerHTML = '❌ ';
-                            if (data.error) lastStep.innerHTML += `<div style="color:#c62828;font-size:12px;margin-top:4px;">${escapeHtml(data.error)}</div>`;
+                        if (currentMessageContent) {
+                            const containers = currentMessageContent.querySelectorAll('.plan-step-container');
+                            for (const container of containers) {
+                                const header = container.querySelector('.plan-step-header');
+                                if (header && header.querySelector('.spinner')) {
+                                    header.style.background = '#ffebee';
+                                    header.style.borderLeftColor = '#e53935';
+                                    const spinner = header.querySelector('.spinner');
+                                    spinner.outerHTML = '❌ ';
+                                    const statusSpan = header.querySelector('span:last-child');
+                                    if (statusSpan && statusSpan.textContent === '执行中') {
+                                        statusSpan.textContent = '失败';
+                                        statusSpan.style.color = '#c62828';
+                                    }
+                                    if (data.error) {
+                                        const output = container.querySelector('.plan-step-output');
+                                        if (output) {
+                                            output.style.display = 'block';
+                                            output.innerHTML += `<div style="color:#c62828;font-size:12px;margin-top:4px;padding:6px 8px;background:#ffebee;border-radius:4px;">${escapeHtml(data.error)}</div>`;
+                                        }
+                                    }
+                                }
+                            }
                         }
                         break;
                     }
