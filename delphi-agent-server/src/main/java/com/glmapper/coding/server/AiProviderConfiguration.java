@@ -40,6 +40,25 @@ public class AiProviderConfiguration {
     }
 
     @Bean
+    public OpenAiChatModel anthropicChatModel() {
+        String apiKey = resolveKey("ANTHROPIC_API_KEY");
+        String baseUrl = System.getenv("ANTHROPIC_BASE_URL");
+        if (baseUrl == null || baseUrl.isBlank()) {
+            baseUrl = "https://api.anthropic.com";
+        }
+        var api = OpenAiApi.builder()
+                .baseUrl(baseUrl)
+                .apiKey(apiKey)
+                .build();
+        return OpenAiChatModel.builder().openAiApi(api).build();
+    }
+
+    @Bean
+    public ApiProvider anthropicProvider(@Qualifier("anthropicChatModel") OpenAiChatModel anthropicChatModel) {
+        return new SpringAiChatModelProvider("spring-ai-anthropic", anthropicChatModel);
+    }
+
+    @Bean
     public ApiProviderRegistry apiProviderRegistry(List<ApiProvider> providers) {
         ApiProviderRegistry registry = new ApiProviderRegistry();
         providers.forEach(registry::register);

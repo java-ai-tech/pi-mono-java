@@ -13,6 +13,9 @@ spring:
       api-key: ${OPENAI_API_KEY:}
     zhipuai:
       api-key: ${ZHIPUAI_API_KEY:}
+    anthropic:
+      api-key: ${ANTHROPIC_API_KEY:}
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
 
 pi:
   resources:
@@ -56,6 +59,24 @@ pi:
       input: [text, image]
       context-window: 128000
       max-tokens: 4096
+    - id: claude-sonnet-4-20250514
+      name: Claude Sonnet 4
+      api: spring-ai-anthropic
+      provider: anthropic
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+      reasoning: false
+      input: [text, image]
+      context-window: 200000
+      max-tokens: 8192
+    - id: claude-haiku-3-5-20241022
+      name: Claude Haiku 3.5
+      api: spring-ai-anthropic
+      provider: anthropic
+      base-url: ${ANTHROPIC_BASE_URL:https://api.anthropic.com}
+      reasoning: false
+      input: [text, image]
+      context-window: 200000
+      max-tokens: 8192
   defaults:
     provider: deepseek
     model-id: deepseek-chat
@@ -73,6 +94,7 @@ pi:
     - OPENAI_API_KEY
     - DEEPSEEK_API_KEY
     - ZHIPUAI_API_KEY
+    - ANTHROPIC_API_KEY
   rate-limit:
     enabled: true
     default-rpm: 60
