@@ -269,7 +269,6 @@
                     <select id="provider">
                         <option value="deepseek">DeepSeek</option>
                         <option value="zhipuai">智谱 AI (GLM)</option>
-                        <option value="openai">OpenAI</option>
                     </select>
                 </div>
                 <div class="form-group">
@@ -343,16 +342,16 @@
                 { value: 'deepseek-reasoner', label: 'deepseek-reasoner' }
             ],
             zhipuai: [
-                { value: 'glm-4', label: 'glm-4' },
-                { value: 'glm-4-flash', label: 'glm-4-flash' }
-            ],
-            openai: [
-                { value: 'gpt-4o-mini', label: 'gpt-4o-mini' }
+                { value: 'glm-4-plus', label: 'glm-4-plus' },
+                { value: 'glm-4-flash', label: 'glm-4-flash' },
+                { value: 'glm-4-air', label: 'glm-4-air' },
+                { value: 'glm-4', label: 'glm-4' }
             ]
         };
 
-        document.getElementById('provider').addEventListener('change', function() {
-            const provider = this.value;
+        // Initialize model dropdown on page load
+        function updateModelDropdown() {
+            const provider = document.getElementById('provider').value;
             const modelSelect = document.getElementById('modelId');
             modelSelect.innerHTML = '';
             modelOptions[provider].forEach(opt => {
@@ -361,7 +360,12 @@
                 option.textContent = opt.label;
                 modelSelect.appendChild(option);
             });
-        });
+        }
+
+        document.getElementById('provider').addEventListener('change', updateModelDropdown);
+
+        // Initialize on page load
+        window.addEventListener('DOMContentLoaded', updateModelDropdown);
 
         function setStatus(text, type = 'idle') {
             const status = document.getElementById('status');
@@ -485,6 +489,7 @@
 
             let currentMessageContent = null;
             let currentText = '';
+            let isOrchestrated = (mode === 'orchestrated');
 
             try {
                 const requestBody = {
@@ -582,6 +587,8 @@
                         }
                         break;
                     case 'text':
+                        // In orchestrated mode, skip text events - output is shown in step_output
+                        if (isOrchestrated) break;
                         currentText += data.delta;
                         if (currentMessageContent) {
                             let textNode = currentMessageContent.querySelector('.msg-text');
@@ -595,6 +602,8 @@
                         }
                         break;
                     case 'tool_start':
+                        // Skip rendering for tools called within plan steps (they have stepId)
+                        if (data.stepId || data.phase === 'planning') break;
                         if (currentMessageContent) {
                             const toolDiv = document.createElement('div');
                             toolDiv.id = 'inline-tool-' + CSS.escape(data.toolCallId);
@@ -605,6 +614,8 @@
                         }
                         break;
                     case 'tool_end': {
+                        // Skip rendering for tools called within plan steps
+                        if (data.stepId || data.phase === 'planning') break;
                         const toolDiv = document.getElementById('inline-tool-' + CSS.escape(data.toolCallId));
                         if (toolDiv) {
                             const icon = data.isError ? '❌' : '✅';

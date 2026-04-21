@@ -45,7 +45,7 @@ public class OrchestratedChatService {
         ));
 
         try {
-            appendText(sink, assistantText, "开始分析任务并生成执行计划。\n");
+            // Don't emit text for planning start - it's redundant with planning_started event
             emit(sink, "planning_started", Map.of("type", "planning_started", "prompt", prompt));
 
             ExecutionPlan plan = plannerService.createPlan(
@@ -95,8 +95,8 @@ public class OrchestratedChatService {
                     "totalSteps", plan.steps().size()
             ));
 
-            appendText(sink, assistantText,
-                    "已生成 %d 个执行步骤，开始逐项处理。\n".formatted(plan.steps().size()));
+            // Don't emit text for execution start - the plan UI shows this info
+            assistantText.append("已生成 %d 个执行步骤，开始逐项处理。\n".formatted(plan.steps().size()));
 
             PlanExecutionContext context = new PlanExecutionContext(
                     namespace,
