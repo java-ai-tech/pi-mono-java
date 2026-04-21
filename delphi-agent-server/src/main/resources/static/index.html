@@ -766,9 +766,13 @@
                         break;
                     case 'done':
                         setStatus('完成', 'idle');
+                        isStreaming = false;
+                        document.getElementById('sendBtn').disabled = false;
                         break;
                     case 'error':
                         setStatus('错误: ' + (data.message || 'unknown'), 'error');
+                        isStreaming = false;
+                        document.getElementById('sendBtn').disabled = false;
                         break;
                 }
             }

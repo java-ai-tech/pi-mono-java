@@ -101,8 +101,9 @@ public class SkillAgentTool implements AgentTool {
         return CompletableFuture.supplyAsync(() -> {
             Map<String, Object> safeParams = params == null ? Map.of() : params;
 
-            // Validate parameters against argsSchema if present
-            if (skill.argsSchema() != null && !skill.argsSchema().isBlank()) {
+            // Only validate params for executable skills (scripts need correct args)
+            // Instructional skills just inject content into context, no strict validation needed
+            if (skill.isExecutable() && skill.argsSchema() != null && !skill.argsSchema().isBlank()) {
                 validateParams(safeParams);
             }
 
