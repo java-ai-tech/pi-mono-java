@@ -9,7 +9,6 @@ import com.glmapper.ai.spi.ModelCatalog;
 import com.glmapper.coding.core.config.PiAgentProperties;
 import org.springframework.ai.openai.OpenAiChatModel;
 import org.springframework.ai.openai.api.OpenAiApi;
-import org.springframework.ai.zhipuai.ZhiPuAiChatModel;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -32,30 +31,6 @@ public class AiProviderConfiguration {
     @Bean
     public ApiProvider deepseekProvider(@Qualifier("deepseekChatModel") OpenAiChatModel deepseekChatModel) {
         return new SpringAiChatModelProvider("spring-ai-deepseek", deepseekChatModel);
-    }
-
-    @Bean
-    public ApiProvider zhipuaiProvider(ZhiPuAiChatModel zhipuaiChatModel) {
-        return new SpringAiChatModelProvider("spring-ai-zhipuai", zhipuaiChatModel);
-    }
-
-    @Bean
-    public OpenAiChatModel anthropicChatModel() {
-        String apiKey = resolveKey("ANTHROPIC_API_KEY");
-        String baseUrl = System.getenv("ANTHROPIC_BASE_URL");
-        if (baseUrl == null || baseUrl.isBlank()) {
-            baseUrl = "https://api.anthropic.com";
-        }
-        var api = OpenAiApi.builder()
-                .baseUrl(baseUrl)
-                .apiKey(apiKey)
-                .build();
-        return OpenAiChatModel.builder().openAiApi(api).build();
-    }
-
-    @Bean
-    public ApiProvider anthropicProvider(@Qualifier("anthropicChatModel") OpenAiChatModel anthropicChatModel) {
-        return new SpringAiChatModelProvider("spring-ai-anthropic", anthropicChatModel);
     }
 
     @Bean
