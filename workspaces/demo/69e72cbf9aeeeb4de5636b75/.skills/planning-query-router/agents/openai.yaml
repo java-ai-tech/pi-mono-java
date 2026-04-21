@@ -1,0 +1,4 @@
+interface:
+  display_name: "Planning Query Router"
+  short_description: "Plan tasks and route prompts to knowledge/data SSE APIs"
+  default_prompt: "Analyze user prompt and context, output a plan, and route to the correct SSE API."
