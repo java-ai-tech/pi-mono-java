@@ -1,7 +1,9 @@
 package com.glmapper.coding.core.service;
 
 import com.glmapper.agent.core.Agent;
+import com.glmapper.coding.core.config.PiAgentProperties;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.time.Duration;
@@ -34,6 +36,15 @@ public class SessionLifecycleManager {
     });
     private Consumer<ManagedSession> onEvict;
 
+    @Autowired
+    public SessionLifecycleManager(PiAgentProperties properties) {
+        this(
+                resolveMaxSessions(properties),
+                resolveIdleTtl(properties),
+                resolveReapInterval(properties)
+        );
+    }
+
     public SessionLifecycleManager() {
         this(DEFAULT_MAX_SESSIONS, DEFAULT_IDLE_TTL, DEFAULT_REAP_INTERVAL);
     }
@@ -47,6 +58,27 @@ public class SessionLifecycleManager {
                 reapInterval.toMillis(),
                 TimeUnit.MILLISECONDS
         );
+    }
+
+    private static int resolveMaxSessions(PiAgentProperties properties) {
+        if (properties == null || properties.session() == null || properties.session().maxSessions() <= 0) {
+            return DEFAULT_MAX_SESSIONS;
+        }
+        return properties.session().maxSessions();
+    }
+
+    private static Duration resolveIdleTtl(PiAgentProperties properties) {
+        if (properties == null || properties.session() == null || properties.session().idleTtlHours() <= 0) {
+            return DEFAULT_IDLE_TTL;
+        }
+        return Duration.ofHours(properties.session().idleTtlHours());
+    }
+
+    private static Duration resolveReapInterval(PiAgentProperties properties) {
+        if (properties == null || properties.session() == null || properties.session().reapIntervalMinutes() <= 0) {
+            return DEFAULT_REAP_INTERVAL;
+        }
+        return Duration.ofMinutes(properties.session().reapIntervalMinutes());
     }
 
     /**

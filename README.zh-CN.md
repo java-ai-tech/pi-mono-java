@@ -17,12 +17,18 @@
 
 本仓库既包含可复用组件，也包含可直接运行的参考服务 `delphi-agent-server`。
 
+## 架构与深度走查
+
+- [全面深度走查（2026-04-21）](./ARCHITECTURE.zh-CN.md)
+- [文档导航](./DOCS.md)
+
 ## 核心能力
 
 - 通过 `delphi-agent-ai-api` 统一模型调度（`AiRuntime`、`ApiProviderRegistry`、`ModelCatalog`）
 - Agent 运行时支持工具调用（并行/串行）
 - 会话能力：create、prompt、continue、steer、follow-up、fork、tree navigate、compact
-- 提供 Session / RPC / Skills / 直接流式聊天等 HTTP API
+- 提供流式聊天、资源目录、审计、用量查询等 HTTP API
+- Session/RPC 处理能力在 runtime/sdk 层可用
 - Skill 可见性按 namespace 分层：`public` + `namespaces/<tenant>`
 - 两种执行后端：
   - Docker 隔离后端（默认）
@@ -108,10 +114,13 @@ mvn -q -pl delphi-agent-server spring-boot:run -Dspring-boot.run.profiles=local-
 
 ```bash
 curl http://localhost:8080/actuator/health
-curl http://localhost:8080/api/sessions/models
+curl http://localhost:8080/api/catalog/models
 ```
 
 ## 主要调用流程
+
+> 说明：下文 Session/RPC 章节描述的是 runtime 能力与历史协议契约。  
+> 当前参考服务对外主要暴露 `/api/chat/**`、`/api/catalog/**`、`/api/audit`、`/api/usage`。
 
 ### 1）一次性流式聊天（不持久化会话）
 

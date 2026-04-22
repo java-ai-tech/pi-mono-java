@@ -18,12 +18,18 @@ It provides:
 
 This repository contains both reusable libraries and a runnable reference server (`delphi-agent-server`).
 
+## Architecture & Deep Dive
+
+- [Comprehensive Deep Dive (ZH)](./ARCHITECTURE.zh-CN.md)
+- [Docs Index](./DOCS.md)
+
 ## Key Capabilities
 
 - Multi-provider model runtime via `delphi-agent-ai-api` (`AiRuntime`, `ApiProviderRegistry`, `ModelCatalog`)
 - Agent execution core with parallel/sequential tool execution support
 - Session features: create, prompt, continue, steer, follow-up, fork, tree navigation, compact
-- HTTP APIs for Session, RPC, Skill catalog, and one-shot streaming chat
+- HTTP APIs for streaming chat, catalog, audit, and usage queries
+- Runtime/SDK capabilities also include Session/RPC processing primitives
 - Namespace-aware skill visibility: `public` + `namespaces/<tenant>`
 - Two execution backends:
   - Docker isolated backend (default profile)
@@ -109,10 +115,13 @@ Server default: `http://localhost:8080`
 
 ```bash
 curl http://localhost:8080/actuator/health
-curl http://localhost:8080/api/sessions/models
+curl http://localhost:8080/api/catalog/models
 ```
 
 ## Core API Flows
+
+> Note: the Session/RPC sections below describe runtime capabilities and historical contracts.  
+> In the current reference server, externally exposed HTTP endpoints are primarily `/api/chat/**`, `/api/catalog/**`, `/api/audit`, and `/api/usage`.
 
 ### 1) One-shot streaming chat (no persisted session)
 

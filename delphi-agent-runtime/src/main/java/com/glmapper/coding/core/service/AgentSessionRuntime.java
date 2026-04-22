@@ -650,8 +650,17 @@ public class AgentSessionRuntime {
 
             sb.append("Available tools:\n");
             for (AgentTool tool : tools) {
-                String type = (tool instanceof com.glmapper.coding.core.tools.SkillAgentTool skillTool
-                        && skillTool.getSkill().isExecutable()) ? "executable" : "instructional";
+                String type;
+                if (tool instanceof com.glmapper.coding.core.tools.SkillAgentTool skillTool) {
+                    type = skillTool.getSkill().isExecutable() ? "executable" : "instructional";
+                } else {
+                    type = switch (tool.name()) {
+                        case "read", "grep", "find", "ls" -> "readonly";
+                        case "write", "edit" -> "mutating";
+                        case "bash" -> "executable";
+                        default -> "built-in";
+                    };
+                }
                 sb.append("- `").append(tool.name()).append("` [").append(type).append("]: ").append(tool.description()).append("\n");
             }
         }

@@ -5,6 +5,9 @@ spring:
     import: optional:file:.env[.properties]
   application:
     name: delphi-agent-server
+  ai:
+    openai:
+      api-key: ${OPENAI_API_KEY:}
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
@@ -45,6 +48,28 @@ pi:
     default-keep-count: 20
   planning:
     timeout-seconds: ${PI_PLANNING_TIMEOUT:45}
+  tools:
+    builtin:
+      enabled: ${PI_TOOLS_BUILTIN_ENABLED:true}
+      available: [read, bash, edit, write, grep, find, ls]
+      default-enabled: [read, bash, edit, write]
+      read:
+        max-lines: ${PI_TOOLS_READ_MAX_LINES:2000}
+        max-bytes: ${PI_TOOLS_READ_MAX_BYTES:51200}
+      bash:
+        default-timeout-seconds: ${PI_TOOLS_BASH_TIMEOUT_SECONDS:1800}
+        max-lines: ${PI_TOOLS_BASH_MAX_LINES:2000}
+        max-bytes: ${PI_TOOLS_BASH_MAX_BYTES:51200}
+      grep:
+        default-limit: ${PI_TOOLS_GREP_DEFAULT_LIMIT:100}
+        max-line-length: ${PI_TOOLS_GREP_MAX_LINE_LENGTH:500}
+        max-bytes: ${PI_TOOLS_GREP_MAX_BYTES:51200}
+      find:
+        default-limit: ${PI_TOOLS_FIND_DEFAULT_LIMIT:1000}
+        max-bytes: ${PI_TOOLS_FIND_MAX_BYTES:51200}
+      ls:
+        default-limit: ${PI_TOOLS_LS_DEFAULT_LIMIT:500}
+        max-bytes: ${PI_TOOLS_LS_MAX_BYTES:51200}
   api-keys:
     - DEEPSEEK_API_KEY
   rate-limit:

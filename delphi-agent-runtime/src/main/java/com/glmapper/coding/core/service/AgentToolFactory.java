@@ -6,6 +6,7 @@ import com.glmapper.coding.core.catalog.SkillsResolver;
 import com.glmapper.coding.core.execution.ExecutionBackend;
 import com.glmapper.coding.core.execution.ExecutionContext;
 import com.glmapper.coding.core.tools.SkillAgentTool;
+import com.glmapper.coding.core.tools.builtin.BuiltinToolFactory;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -19,10 +20,16 @@ public class AgentToolFactory {
 
     private final SkillsResolver skillsResolver;
     private final ExecutionBackend executionBackend;
+    private final BuiltinToolFactory builtinToolFactory;
 
-    public AgentToolFactory(SkillsResolver skillsResolver, ExecutionBackend executionBackend) {
+    public AgentToolFactory(
+            SkillsResolver skillsResolver,
+            ExecutionBackend executionBackend,
+            BuiltinToolFactory builtinToolFactory
+    ) {
         this.skillsResolver = skillsResolver;
         this.executionBackend = executionBackend;
+        this.builtinToolFactory = builtinToolFactory;
     }
 
     public List<AgentTool> createTools(String namespace, String sessionId) {
@@ -31,7 +38,7 @@ public class AgentToolFactory {
                 ? "chat-" + System.currentTimeMillis()
                 : sessionId;
         ExecutionContext execCtx = new ExecutionContext(effectiveNamespace, effectiveSessionId, null);
-        List<AgentTool> tools = new ArrayList<>();
+        List<AgentTool> tools = new ArrayList<>(builtinToolFactory.createDefaultTools(execCtx));
         for (SkillInfo skill : skillsResolver.resolveSkills(effectiveNamespace)) {
             tools.add(new SkillAgentTool(skill, executionBackend, execCtx));
         }
@@ -51,9 +58,16 @@ public class AgentToolFactory {
         String effectiveSessionId = sessionId == null || sessionId.isBlank()
                 ? "chat-" + System.currentTimeMillis()
                 : sessionId;
+        ExecutionContext execCtx = new ExecutionContext(effectiveNamespace, effectiveSessionId, null);
+
+        Optional<AgentTool> builtIn = builtinToolFactory.resolveTool(toolName, execCtx);
+        if (builtIn.isPresent()) {
+            return builtIn;
+        }
+
         String skillName = toolName.startsWith("skill_") ? toolName.substring(6) : toolName;
         return skillsResolver.resolveSkill(effectiveNamespace, skillName)
                 .map(skill -> (AgentTool) new SkillAgentTool(skill, executionBackend,
-                        new ExecutionContext(effectiveNamespace, effectiveSessionId, null)));
+                        execCtx));
     }
 }

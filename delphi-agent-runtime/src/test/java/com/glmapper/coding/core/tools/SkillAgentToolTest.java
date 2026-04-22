@@ -57,7 +57,7 @@ class SkillAgentToolTest {
         // Skill files should be copied to skill-isolated workspace
         assertTrue(Files.exists(workspace.resolve(".skills/deploy/deploy.sh")));
         // Command should execute from the isolated skill directory
-        Mockito.verify(backend).execute(eq(ctx), eq("cd '.skills/deploy' && ./deploy.sh --env staging"), any(ExecutionOptions.class));
+        Mockito.verify(backend).execute(eq(ctx), eq("cd '.skills/deploy' && './deploy.sh' --env staging"), any(ExecutionOptions.class));
     }
 
     @Test
@@ -109,7 +109,7 @@ class SkillAgentToolTest {
         ArgumentCaptor<ExecutionOptions> optionsCaptor = ArgumentCaptor.forClass(ExecutionOptions.class);
         Mockito.verify(backend).execute(eq(ctx), commandCaptor.capture(), optionsCaptor.capture());
 
-        assertEquals("cd '.skills/deploy' && ./deploy.sh '{\"env\":\"staging\",\"service\":\"api\"}'", commandCaptor.getValue());
+        assertEquals("cd '.skills/deploy' && './deploy.sh' '{\"env\":\"staging\",\"service\":\"api\"}'", commandCaptor.getValue());
         assertEquals(
                 "{\"env\":\"staging\",\"service\":\"api\"}",
                 optionsCaptor.getValue().envVars().get("PI_SKILL_ARGS_JSON")

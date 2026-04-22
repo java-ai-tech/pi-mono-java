@@ -6,7 +6,6 @@ import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import org.springframework.stereotype.Component;
 import org.springframework.web.servlet.HandlerInterceptor;
-import org.springframework.web.util.ContentCachingRequestWrapper;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
@@ -49,19 +48,11 @@ public class RateLimitInterceptor implements HandlerInterceptor {
 
     @SuppressWarnings("unchecked")
     private String extractNamespace(HttpServletRequest request) {
+        if (!(request instanceof CachedBodyHttpServletRequest)) {
+            return null;
+        }
         try {
-            ContentCachingRequestWrapper wrapper;
-            if (request instanceof ContentCachingRequestWrapper) {
-                wrapper = (ContentCachingRequestWrapper) request;
-            } else {
-                return null;
-            }
-            byte[] body = wrapper.getContentAsByteArray();
-            if (body.length == 0) {
-                // Force reading the input stream
-                request.getInputStream().readAllBytes();
-                body = wrapper.getContentAsByteArray();
-            }
+            byte[] body = request.getInputStream().readAllBytes();
             if (body.length == 0) {
                 return null;
             }

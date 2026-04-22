@@ -1,5 +1,8 @@
 package com.glmapper.coding.core.orchestration;
 
+import com.glmapper.coding.core.service.AgentSessionRuntime;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.stereotype.Service;
 
 import java.util.LinkedHashMap;
@@ -7,18 +10,23 @@ import java.util.Map;
 
 @Service
 public class OrchestratedChatService {
+    private static final Logger log = LoggerFactory.getLogger(OrchestratedChatService.class);
+
     private final PlannerService plannerService;
     private final PlanDispatcher planDispatcher;
     private final PlanResultAggregator planResultAggregator;
+    private final AgentSessionRuntime sessionRuntime;
 
     public OrchestratedChatService(
             PlannerService plannerService,
             PlanDispatcher planDispatcher,
-            PlanResultAggregator planResultAggregator
+            PlanResultAggregator planResultAggregator,
+            AgentSessionRuntime sessionRuntime
     ) {
         this.plannerService = plannerService;
         this.planDispatcher = planDispatcher;
         this.planResultAggregator = planResultAggregator;
+        this.sessionRuntime = sessionRuntime;
     }
 
     public void stream(
@@ -116,6 +124,13 @@ public class OrchestratedChatService {
                 appendText(sink, assistantText, "\n最终结果：\n" + finalSummary);
             }
 
+            sessionRuntime.persistOrchestrationTurn(
+                    effectiveSessionId,
+                    namespace,
+                    prompt,
+                    assistantText.toString()
+            );
+
             emit(sink, "message_end", Map.of(
                     "type", "message_end",
                     "role", "assistant",
@@ -135,6 +150,21 @@ public class OrchestratedChatService {
                     "message", e.getMessage() == null ? "执行失败" : e.getMessage()
             ));
             emit(sink, "done", Map.of("type", "done", "planStatus", PlanStatus.FAILED.name()));
+
+            try {
+                String errorLine = e.getMessage() == null ? "执行失败" : e.getMessage();
+                String persistedText = assistantText.isEmpty()
+                        ? "编排执行失败：" + errorLine
+                        : assistantText + "\n\n编排执行失败：" + errorLine;
+                sessionRuntime.persistOrchestrationTurn(
+                        effectiveSessionId,
+                        namespace,
+                        prompt,
+                        persistedText
+                );
+            } catch (Exception persistError) {
+                log.warn("Failed to persist orchestrated failure result: sessionId={}", effectiveSessionId, persistError);
+            }
         }
     }
 

@@ -15,9 +15,11 @@ import com.glmapper.ai.api.StopReason;
 import com.glmapper.ai.api.TextContent;
 import com.glmapper.ai.spi.AiRuntime;
 import com.glmapper.ai.spi.ModelCatalog;
+import com.glmapper.coding.core.config.PiAgentProperties;
 import com.glmapper.coding.core.tools.TaskPlanningTool;
 import com.glmapper.coding.core.tools.SkillAgentTool;
 import com.glmapper.coding.core.service.AgentToolFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
 import java.util.ArrayList;
@@ -34,21 +36,34 @@ import java.util.stream.Collectors;
 @Service
 public class PlannerService {
     private static final TypeReference<Map<String, Object>> MAP_TYPE = new TypeReference<>() {};
+    private static final int DEFAULT_PLANNING_TIMEOUT_SECONDS = 45;
 
     private final AiRuntime aiRuntime;
     private final ModelCatalog modelCatalog;
     private final AgentToolFactory agentToolFactory;
     private final ObjectMapper objectMapper;
+    private final int planningTimeoutSeconds;
 
     public PlannerService(
             AiRuntime aiRuntime,
             ModelCatalog modelCatalog,
             AgentToolFactory agentToolFactory
     ) {
+        this(aiRuntime, modelCatalog, agentToolFactory, null);
+    }
+
+    @Autowired
+    public PlannerService(
+            AiRuntime aiRuntime,
+            ModelCatalog modelCatalog,
+            AgentToolFactory agentToolFactory,
+            PiAgentProperties properties
+    ) {
         this.aiRuntime = aiRuntime;
         this.modelCatalog = modelCatalog;
         this.agentToolFactory = agentToolFactory;
         this.objectMapper = new ObjectMapper();
+        this.planningTimeoutSeconds = resolvePlanningTimeoutSeconds(properties);
     }
 
     public ExecutionPlan createPlan(
@@ -93,7 +108,7 @@ public class PlannerService {
 
         try {
             agent.prompt(buildPlanningPrompt(userPrompt))
-                    .orTimeout(45, TimeUnit.SECONDS)
+                    .orTimeout(planningTimeoutSeconds, TimeUnit.SECONDS)
                     .join();
         } catch (Exception planningError) {
             effectiveObserver.onPlanningStatus("规划 agent 未在预期时间内完成，回退到内置任务规划。");
@@ -481,5 +496,12 @@ public class PlannerService {
             lastPhase[0] = phase;
             observer.onPlanningStatus(message);
         }
+    }
+
+    private int resolvePlanningTimeoutSeconds(PiAgentProperties properties) {
+        if (properties == null || properties.planning() == null || properties.planning().timeoutSeconds() <= 0) {
+            return DEFAULT_PLANNING_TIMEOUT_SECONDS;
+        }
+        return properties.planning().timeoutSeconds();
     }
 }
