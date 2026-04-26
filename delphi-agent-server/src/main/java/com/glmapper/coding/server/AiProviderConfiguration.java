@@ -7,8 +7,9 @@ import com.glmapper.ai.spi.ApiProvider;
 import com.glmapper.ai.spi.ApiProviderRegistry;
 import com.glmapper.ai.spi.ModelCatalog;
 import com.glmapper.coding.core.config.PiAgentProperties;
-import org.springframework.ai.openai.OpenAiChatModel;
-import org.springframework.ai.openai.api.OpenAiApi;
+import org.springframework.ai.anthropic.AnthropicChatModel;
+import org.springframework.ai.anthropic.AnthropicChatOptions;
+import org.springframework.ai.anthropic.api.AnthropicApi;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -17,19 +18,33 @@ import java.util.List;
 
 @Configuration
 public class AiProviderConfiguration {
+    private static final String DEEPSEEK_ANTHROPIC_BASE_URL = "https://api.deepseek.com/anthropic";
 
     @Bean
-    public OpenAiChatModel deepseekChatModel() {
+    public AnthropicChatModel deepseekChatModel() {
         String apiKey = resolveKey("DEEPSEEK_API_KEY");
-        var api = OpenAiApi.builder()
-                .baseUrl("https://api.deepseek.com")
+        var api = AnthropicApi.builder()
+                .baseUrl(DEEPSEEK_ANTHROPIC_BASE_URL)
                 .apiKey(apiKey)
                 .build();
-        return OpenAiChatModel.builder().openAiApi(api).build();
+
+        // DeepSeek Anthropic 兼容端点的两条强约束：
+        // 1. max_tokens 是必填字段（原版 Anthropic API 也是必填，但 Spring AI 不会自动填默认值）
+        // 2. 多轮对话中开启 thinking 后必须把 thinking blocks 原样回传，
+        //    Spring AI 当前实现不支持，因此显式禁用 thinking
+        var options = AnthropicChatOptions.builder()
+                .maxTokens(8192)
+                .thinking(AnthropicApi.ThinkingType.DISABLED, null)
+                .build();
+
+        return AnthropicChatModel.builder()
+                .anthropicApi(api)
+                .defaultOptions(options)
+                .build();
     }
 
     @Bean
-    public ApiProvider deepseekProvider(@Qualifier("deepseekChatModel") OpenAiChatModel deepseekChatModel) {
+    public ApiProvider deepseekProvider(@Qualifier("deepseekChatModel") AnthropicChatModel deepseekChatModel) {
         return new SpringAiChatModelProvider("spring-ai-deepseek", deepseekChatModel);
     }
 

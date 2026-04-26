@@ -1,12 +1,14 @@
 package com.glmapper.coding.core.service;
 
 import com.glmapper.agent.core.AgentTool;
-import com.glmapper.coding.core.catalog.SkillInfo;
-import com.glmapper.coding.core.catalog.SkillsResolver;
-import com.glmapper.coding.core.execution.ExecutionBackend;
-import com.glmapper.coding.core.execution.ExecutionContext;
-import com.glmapper.coding.core.tools.SkillAgentTool;
-import com.glmapper.coding.core.tools.builtin.BuiltinToolFactory;
+import com.glmapper.coding.core.runtime.subagent.SubagentRole;
+import com.glmapper.coding.core.runtime.subagent.WorkspaceScope;
+import com.glmapper.coding.core.tools.policy.ToolCategory;
+import com.glmapper.coding.core.tools.policy.ToolInventory;
+import com.glmapper.coding.core.tools.policy.ToolPolicyPipeline;
+import com.glmapper.coding.core.tools.policy.ToolRuntimeContext;
+import com.glmapper.coding.core.tools.subagent.SubagentOrchestrationToolFactory;
+import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 import java.util.ArrayList;
@@ -18,56 +20,105 @@ import static com.glmapper.agent.core.AgentConstants.DEFAULT_NAMESPACE;
 @Component
 public class AgentToolFactory {
 
-    private final SkillsResolver skillsResolver;
-    private final ExecutionBackend executionBackend;
-    private final BuiltinToolFactory builtinToolFactory;
+    private final ToolInventory toolInventory;
+    private final ToolPolicyPipeline toolPolicyPipeline;
 
-    public AgentToolFactory(
-            SkillsResolver skillsResolver,
-            ExecutionBackend executionBackend,
-            BuiltinToolFactory builtinToolFactory
-    ) {
-        this.skillsResolver = skillsResolver;
-        this.executionBackend = executionBackend;
-        this.builtinToolFactory = builtinToolFactory;
+    @Autowired(required = false)
+    private SubagentOrchestrationToolFactory subagentOrchestrationToolFactory;
+
+    public AgentToolFactory(ToolInventory toolInventory,
+                            ToolPolicyPipeline toolPolicyPipeline) {
+        this.toolInventory = toolInventory;
+        this.toolPolicyPipeline = toolPolicyPipeline;
     }
 
     public List<AgentTool> createTools(String namespace, String sessionId) {
-        String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
-        String effectiveSessionId = sessionId == null || sessionId.isBlank()
-                ? "chat-" + System.currentTimeMillis()
-                : sessionId;
-        ExecutionContext execCtx = new ExecutionContext(effectiveNamespace, effectiveSessionId, null);
-        List<AgentTool> tools = new ArrayList<>(builtinToolFactory.createDefaultTools(execCtx));
-        for (SkillInfo skill : skillsResolver.resolveSkills(effectiveNamespace)) {
-            tools.add(new SkillAgentTool(skill, executionBackend, execCtx));
+        ToolRuntimeContext context = new ToolRuntimeContext(
+                namespace,
+                namespace,
+                null,
+                null,
+                sessionId == null || sessionId.isBlank() ? "chat-" + System.currentTimeMillis() : sessionId,
+                null,
+                null,
+                SubagentRole.ORCHESTRATOR,
+                0,
+                WorkspaceScope.SESSION
+        );
+        return createTools(context);
+    }
+
+    public List<AgentTool> createTools(ToolRuntimeContext context) {
+        List<ToolInventory.Item> inventoryItems = new ArrayList<>(toolInventory.collect(context));
+        if (subagentOrchestrationToolFactory != null && context.agentRole() == SubagentRole.ORCHESTRATOR) {
+            for (AgentTool tool : subagentOrchestrationToolFactory.createTools(context)) {
+                inventoryItems.add(new ToolInventory.Item(
+                        tool,
+                        ToolCategory.ORCHESTRATION,
+                        "builtin",
+                        tool.name()
+                ));
+            }
         }
-        return tools;
+        return toolPolicyPipeline.apply(context, inventoryItems);
     }
 
     public List<AgentTool> createPlanningTools(String namespace, String sessionId, String taskText) {
-        return createTools(namespace, sessionId);
+        String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
+        ToolRuntimeContext context = new ToolRuntimeContext(
+                effectiveNamespace,
+                effectiveNamespace,
+                null,
+                null,
+                sessionId == null || sessionId.isBlank() ? "chat-" + System.currentTimeMillis() : sessionId,
+                null,
+                null,
+                SubagentRole.PLANNER,
+                1,
+                WorkspaceScope.SESSION
+        );
+        return createTools(context);
     }
 
     public List<AgentTool> createExecutionTools(String namespace, String sessionId, String taskText) {
-        return createTools(namespace, sessionId);
+        String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
+        ToolRuntimeContext context = new ToolRuntimeContext(
+                effectiveNamespace,
+                effectiveNamespace,
+                null,
+                null,
+                sessionId == null || sessionId.isBlank() ? "chat-" + System.currentTimeMillis() : sessionId,
+                null,
+                null,
+                SubagentRole.CODER,
+                1,
+                WorkspaceScope.SESSION
+        );
+        return createTools(context);
     }
 
-    public Optional<AgentTool> resolveTool(String namespace, String sessionId, String toolName, boolean includePlanningTool) {
-        String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
-        String effectiveSessionId = sessionId == null || sessionId.isBlank()
-                ? "chat-" + System.currentTimeMillis()
-                : sessionId;
-        ExecutionContext execCtx = new ExecutionContext(effectiveNamespace, effectiveSessionId, null);
-
-        Optional<AgentTool> builtIn = builtinToolFactory.resolveTool(toolName, execCtx);
-        if (builtIn.isPresent()) {
-            return builtIn;
+    public Optional<AgentTool> resolveTool(String namespace,
+                                           String sessionId,
+                                           String toolName,
+                                           boolean includePlanningTool) {
+        if (toolName == null || toolName.isBlank()) {
+            return Optional.empty();
         }
-
-        String skillName = toolName.startsWith("skill_") ? toolName.substring(6) : toolName;
-        return skillsResolver.resolveSkill(effectiveNamespace, skillName)
-                .map(skill -> (AgentTool) new SkillAgentTool(skill, executionBackend,
-                        execCtx));
+        String effectiveNamespace = namespace == null || namespace.isBlank() ? DEFAULT_NAMESPACE : namespace;
+        ToolRuntimeContext context = new ToolRuntimeContext(
+                effectiveNamespace,
+                effectiveNamespace,
+                null,
+                null,
+                sessionId == null || sessionId.isBlank() ? "chat-" + System.currentTimeMillis() : sessionId,
+                null,
+                null,
+                SubagentRole.CODER,
+                1,
+                WorkspaceScope.SESSION
+        );
+        return createTools(context).stream()
+                .filter(tool -> toolName.equals(tool.name()))
+                .findFirst();
     }
 }

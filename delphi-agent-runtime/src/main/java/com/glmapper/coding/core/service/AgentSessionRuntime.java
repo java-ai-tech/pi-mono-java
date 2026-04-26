@@ -17,8 +17,12 @@ import com.glmapper.coding.core.mongo.SessionDocument;
 import com.glmapper.coding.core.mongo.SessionEntryDocument;
 import com.glmapper.coding.core.mongo.SessionEntryRepository;
 import com.glmapper.coding.core.mongo.SessionRepository;
+import com.glmapper.coding.core.runtime.AgentRunContext;
+import com.glmapper.coding.core.runtime.subagent.SubagentRole;
+import com.glmapper.coding.core.runtime.subagent.WorkspaceScope;
 import com.glmapper.coding.core.tenant.AuditService;
 import com.glmapper.coding.core.tenant.UsageMeteringService;
+import com.glmapper.coding.core.tools.policy.ToolRuntimeContext;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Service;
 
@@ -342,14 +346,6 @@ public class AgentSessionRuntime {
         };
     }
 
-    public void configureRunTools(com.glmapper.coding.core.runtime.AgentRunContext context) {
-        if (context == null) {
-            return;
-        }
-        validateNamespace(context.sessionId(), context.namespace());
-        lifecycleManager.touch(context.sessionId());
-    }
-
     public SessionStateSnapshot state(String sessionId, String namespace) {
         validateNamespace(sessionId, namespace);
         lifecycleManager.touch(sessionId);
@@ -372,6 +368,29 @@ public class AgentSessionRuntime {
         validateNamespace(sessionId, namespace);
         lifecycleManager.touch(sessionId);
         return getOrCreateLiveAgent(sessionId).state().messages();
+    }
+
+    public void configureRunTools(AgentRunContext context) {
+        validateNamespace(context.sessionId(), context.namespace());
+        lifecycleManager.touch(context.sessionId());
+        SessionDocument session = sessionRepository.findById(context.sessionId())
+                .orElseThrow(() -> new IllegalArgumentException("Session not found: " + context.sessionId()));
+        Agent agent = getOrCreateLiveAgent(context.sessionId());
+        ToolRuntimeContext toolContext = new ToolRuntimeContext(
+                context.tenantId(),
+                context.namespace(),
+                context.userId(),
+                context.projectKey(),
+                context.sessionId(),
+                context.runId(),
+                null,
+                SubagentRole.ORCHESTRATOR,
+                0,
+                WorkspaceScope.SESSION
+        );
+        List<AgentTool> tools = agentToolFactory.createTools(toolContext);
+        agent.state().tools(tools);
+        agent.state().systemPrompt(buildSystemPrompt(session.getSystemPrompt(), tools));
     }
 
     public List<SessionEntryDocument> tree(String sessionId, String namespace) {
@@ -638,6 +657,16 @@ public class AgentSessionRuntime {
     private String buildSystemPrompt(String userPrompt, List<AgentTool> tools) {
         StringBuilder sb = new StringBuilder();
 
+        sb.append("""
+                You are the coordinator agent for an enterprise cloud environment.
+                Do not perform mutating or executable work directly unless runtime policy explicitly allows it.
+                For complex coding, testing, review, or multi-file tasks, spawn subagents with the narrowest role and permissions.
+                Always keep tenant and workspace boundaries intact.
+                Use subagent_result before finalizing work delegated to subagents.
+                Surface failed or partial subagent results clearly.
+
+                """);
+
         // User-provided system prompt
         if (userPrompt != null && !userPrompt.isBlank()) {
             sb.append(userPrompt.trim()).append("\n\n");
@@ -666,6 +695,7 @@ public class AgentSessionRuntime {
                         case "read", "grep", "find", "ls" -> "readonly";
                         case "write", "edit" -> "mutating";
                         case "bash" -> "executable";
+                        case "subagent_spawn", "subagent_status", "subagent_result", "subagent_abort" -> "orchestration";
                         default -> "built-in";
                     };
                 }

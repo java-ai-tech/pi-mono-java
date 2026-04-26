@@ -47,21 +47,6 @@ public class BuiltinToolFactory {
         return tools;
     }
 
-    public Optional<AgentTool> resolveTool(String toolName, ExecutionContext context) {
-        String normalized = normalizeToolName(toolName);
-        if (normalized == null) {
-            return Optional.empty();
-        }
-
-        List<String> available = normalizedUnique(properties.getAvailable(), FALLBACK_AVAILABLE);
-        if (!available.contains(normalized)) {
-            return Optional.empty();
-        }
-
-        AgentTool tool = createTool(normalized, context);
-        return Optional.ofNullable(tool);
-    }
-
     public List<AgentTool> createAvailableTools(ExecutionContext context) {
         if (properties == null || !properties.isEnabled()) {
             return List.of();
@@ -75,6 +60,21 @@ public class BuiltinToolFactory {
             }
         }
         return tools;
+    }
+
+    public Optional<AgentTool> resolveTool(String toolName, ExecutionContext context) {
+        String normalized = normalizeToolName(toolName);
+        if (normalized == null) {
+            return Optional.empty();
+        }
+
+        List<String> available = normalizedUnique(properties.getAvailable(), FALLBACK_AVAILABLE);
+        if (!available.contains(normalized)) {
+            return Optional.empty();
+        }
+
+        AgentTool tool = createTool(normalized, context);
+        return Optional.ofNullable(tool);
     }
 
     private AgentTool createTool(String name, ExecutionContext context) {

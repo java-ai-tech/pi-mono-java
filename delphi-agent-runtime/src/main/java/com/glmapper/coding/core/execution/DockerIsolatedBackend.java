@@ -32,11 +32,6 @@ public class DockerIsolatedBackend implements ExecutionBackend {
     private final long cpuQuota;
     private final String memoryLimit;
     private final int pidsLimit;
-    private final String network;
-    private final boolean readOnlyRootfs;
-    private final String tmpfsTmpSize;
-    private final String tmpfsVarTmpSize;
-    private final String tmpfsRunSize;
 
     @Autowired(required = false)
     private TenantQuotaManager tenantQuotaManager;
@@ -44,26 +39,16 @@ public class DockerIsolatedBackend implements ExecutionBackend {
     @Autowired
     public DockerIsolatedBackend(
             @Value("${pi.execution.workspaces-root:${PI_WORKSPACES_ROOT:./workspaces}}") String workspacesRoot,
-            @Value("${pi.execution.docker.image:pi-agent-sandbox:latest}") String dockerImage,
+            @Value("${pi.execution.docker.image:ubuntu:22.04}") String dockerImage,
             @Value("${pi.execution.docker.cpu-quota:50000}") long cpuQuota,
             @Value("${pi.execution.docker.memory-limit:256m}") String memoryLimit,
-            @Value("${pi.execution.docker.pids-limit:100}") int pidsLimit,
-            @Value("${pi.execution.docker.network:bridge}") String network,
-            @Value("${pi.execution.docker.read-only-rootfs:true}") boolean readOnlyRootfs,
-            @Value("${pi.execution.docker.tmpfs.tmp:512m}") String tmpfsTmpSize,
-            @Value("${pi.execution.docker.tmpfs.var-tmp:128m}") String tmpfsVarTmpSize,
-            @Value("${pi.execution.docker.tmpfs.run:64m}") String tmpfsRunSize
+            @Value("${pi.execution.docker.pids-limit:100}") int pidsLimit
     ) {
         this.workspacesRoot = Paths.get(workspacesRoot).toAbsolutePath();
         this.dockerImage = dockerImage;
         this.cpuQuota = cpuQuota;
         this.memoryLimit = memoryLimit;
         this.pidsLimit = pidsLimit;
-        this.network = network;
-        this.readOnlyRootfs = readOnlyRootfs;
-        this.tmpfsTmpSize = tmpfsTmpSize;
-        this.tmpfsVarTmpSize = tmpfsVarTmpSize;
-        this.tmpfsRunSize = tmpfsRunSize;
         try {
             Files.createDirectories(this.workspacesRoot);
         } catch (IOException e) {
@@ -74,19 +59,12 @@ public class DockerIsolatedBackend implements ExecutionBackend {
 
     /** Package-private constructor for unit tests — skips Docker availability check. */
     DockerIsolatedBackend(String workspacesRoot, String dockerImage, long cpuQuota, String memoryLimit, int pidsLimit,
-                          String network, boolean readOnlyRootfs,
-                          String tmpfsTmpSize, String tmpfsVarTmpSize, String tmpfsRunSize,
                           boolean skipDockerCheck) {
         this.workspacesRoot = Paths.get(workspacesRoot).toAbsolutePath();
         this.dockerImage = dockerImage;
         this.cpuQuota = cpuQuota;
         this.memoryLimit = memoryLimit;
         this.pidsLimit = pidsLimit;
-        this.network = network;
-        this.readOnlyRootfs = readOnlyRootfs;
-        this.tmpfsTmpSize = tmpfsTmpSize;
-        this.tmpfsVarTmpSize = tmpfsVarTmpSize;
-        this.tmpfsRunSize = tmpfsRunSize;
         try {
             Files.createDirectories(this.workspacesRoot);
         } catch (IOException e) {
@@ -153,6 +131,7 @@ public class DockerIsolatedBackend implements ExecutionBackend {
     String[] buildDockerCommand(ExecutionContext context, String command, ExecutionOptions options) {
         Path workspace = getWorkspacePath(context.namespace(), context.sessionId());
 
+        // Resolve per-tenant quotas, falling back to instance defaults
         long effectiveCpuQuota = this.cpuQuota;
         String effectiveMemoryLimit = this.memoryLimit;
         int effectivePidsLimit = this.pidsLimit;
@@ -168,12 +147,10 @@ public class DockerIsolatedBackend implements ExecutionBackend {
         cmd.add("run");
         cmd.add("--rm");
         cmd.add("--network");
-        cmd.add(network);
+        cmd.add("none");
         cmd.add("--user");
         cmd.add("65534:65534");
-        if (readOnlyRootfs) {
-            cmd.add("--read-only");
-        }
+        cmd.add("--read-only");
         cmd.add("--memory");
         cmd.add(effectiveMemoryLimit);
         cmd.add("--cpu-quota");
@@ -181,11 +158,7 @@ public class DockerIsolatedBackend implements ExecutionBackend {
         cmd.add("--pids-limit");
         cmd.add(String.valueOf(effectivePidsLimit));
         cmd.add("--tmpfs");
-        cmd.add("/tmp:rw,noexec,nosuid,size=" + tmpfsTmpSize);
-        cmd.add("--tmpfs");
-        cmd.add("/var/tmp:rw,size=" + tmpfsVarTmpSize);
-        cmd.add("--tmpfs");
-        cmd.add("/run:rw,size=" + tmpfsRunSize);
+        cmd.add("/tmp:rw,noexec,nosuid,size=64m");
         cmd.add("-v");
         cmd.add(workspace.toAbsolutePath() + ":/workspace:rw");
         cmd.add("-w");

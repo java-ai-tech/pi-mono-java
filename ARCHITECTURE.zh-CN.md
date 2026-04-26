@@ -304,3 +304,103 @@ flowchart TB
 ---
 
 如需继续推进，我建议下一步直接落地 `Phase 1`：先做“接口与文档一致性 + 限流生效 + 配置接线”三件事，这三项对平台可用性提升最大。
+
+---
+
+## 10. 架构演进补丁（2026-04-26）
+
+本节记录在原 `As-Is` 基础上落地的一次重要升级，对应代码变更主要分布在 `delphi-agent-runtime`、`delphi-agent-http-api`、`delphi-agent-server` 三个模块。
+
+### 10.1 新增包结构
+
+| 包 | 角色 |
+| --- | --- |
+| `core.runtime` | Run 级运行时：上下文 / 队列 / 失败分类 / 事件发布 / 租户运行守卫 |
+| `core.runtime.subagent` | Subagent 角色、作用域、上下文与运行时（编排型多代理） |
+| `core.tools.policy` | 工具策略管线：清单收集 → 策略决议 → 审计/执行包装 |
+| `core.tools.subagent` | `subagent_spawn` / `subagent_status` / `subagent_result` / `subagent_abort` 编排工具 |
+| `http.api.controller.RuntimeIdentity*` | 运行身份解析（tenant / namespace / user / project） |
+
+### 10.2 工具装配链路（新）
+
+旧链路：`AgentToolFactory` 直接读取 `BuiltinToolFactory` + `SkillsResolver` 拼装工具列表。
+
+新链路：
+
+```mermaid
+flowchart LR
+    A[AgentToolFactory] --> B[ToolInventory.collect]
+    B --> C[BuiltinToolFactory]
+    B --> D[SkillsResolver]
+    A --> E[SubagentOrchestrationToolFactory]
+    A --> F[ToolPolicyPipeline.apply]
+    F --> G[TenantToolPolicyResolver]
+    F --> H[ToolAuditWrapper]
+    F --> I[ToolExecutionWrapper]
+    F --> J[Final AgentTool List]
+```
+
+要点：
+
+- `ToolRuntimeContext` 取代裸 `ExecutionContext`，承载 `tenantId / namespace / userId / projectKey / sessionId / runId / subagentId / agentRole / depth / workspaceScope`。
+- 仅 `agentRole == ORCHESTRATOR` 时挂载 subagent 编排工具；非编排者不可再生成 subagent，避免无限递归。
+- `ToolPolicyPipeline` 负责按租户策略过滤工具，并统一注入审计与执行包装。
+
+### 10.3 Run 级运行时
+
+新增 `AgentRunRuntime` 作为 Run 维度的入口：
+
+- 通过 `TenantRuntimeGuard` 在执行前校验配额/许可。
+- 通过 `RunQueueManager` 实现 `interrupt / followup / steer / drop / reject` 等队列策略，对应 `ChatStreamRequest.queueMode`。
+- 通过 `LiveRunRegistry` 跟踪进行中的 run，实现按 session/run 中止。
+- 通过 `RuntimeEventPublisher` 把运行事件落到 `RuntimeEventSink`（SSE）。
+- 通过 `RunFailureClassifier` 将异常分类为可观测的 `RunFailureType`。
+- 使用 `Executors.newVirtualThreadPerTaskExecutor()` 执行 run，便于高并发。
+
+### 10.4 Subagent 编排
+
+`core.runtime.subagent` 引入了角色化子代理：
+
+| 角色 | 用途 |
+| --- | --- |
+| `ORCHESTRATOR` | 主代理，唯一可生成 subagent |
+| `PLANNER` | 规划任务拆解 |
+| `RESEARCHER` | 信息搜集 |
+| `CODER` | 代码编写/修改 |
+| `REVIEWER` | 代码与产出审查 |
+| `TESTER` | 测试编写与执行 |
+
+`WorkspaceScope` 控制 subagent 工作区可见性：`SESSION` / `PROJECT` / `EPHEMERAL`。
+
+四个编排工具：
+
+- `subagent_spawn`：按 role + task 创建 subagent（支持 `sync` / `async`、`maxDurationSeconds`）。
+- `subagent_status`：查询执行状态。
+- `subagent_result`：拉取最终结果（落盘前主代理必须调用，已写入系统提示语义约束）。
+- `subagent_abort`：中止 subagent。
+
+`AgentSessionRuntime.buildSystemPrompt(...)` 已追加协调者约束：默认不亲自执行 mutating/executable 工作，必要时下发到最小权限 subagent，并在收尾前调用 `subagent_result`。
+
+### 10.5 HTTP / 控制面变更
+
+- `ChatStreamRequest` 新增 `queueMode` 字段，移除 `mode` 字段。
+- `StreamChatController` 重构（约 -150 行净变化），通过 `RuntimeIdentityResolver` 统一解析运行身份（tenant/namespace/user/project），不再在 controller 内重复拼装 context。
+- 静态 `static/index.html` 同步调整以适配新参数。
+
+### 10.6 配置变更
+
+`application.yml` 模型清单升级为新的 DeepSeek 系列：
+
+| 旧 | 新 |
+| --- | --- |
+| `deepseek-chat`（64K / 8K） | `deepseek-v4-pro`（1M / 256K，reasoning） |
+| `deepseek-reasoner`（64K / 8K） | `deepseek-v4-flash`（1M / 256K，reasoning） |
+
+- `base-url` 切到 `https://api.deepseek.com/anthropic`。
+- 默认模型从 `deepseek-chat` 改为 `deepseek-v4-pro`。
+- 移除 `spring.ai.openai.api-key` 兜底（OpenAI 桥接需要在 `AiProviderConfiguration` 显式注册）。
+
+### 10.7 系统提示新增类目
+
+`buildSystemPrompt` 中工具分类映射新增 `orchestration` 类目，覆盖 `subagent_spawn / subagent_status / subagent_result / subagent_abort`，其余 `read/grep/find/ls -> readonly`、`write/edit -> mutating`、`bash -> executable` 与原行为一致。
+

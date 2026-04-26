@@ -1,30 +1,14 @@
 spring:
 #  profiles:
 #    active: local-dev
-   ai:
-     openai:
-       api-key: ${OPENAI_API_KEY:}
-   config:
+  config:
     import: optional:file:.env[.properties]
-    application:
-      name: delphi-agent-server
-    data:
-      mongodb:
-        uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
+  application:
+    name: delphi-agent-server
+  data:
+    mongodb:
+      uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
 pi:
-  execution:
-    workspaces-root: ${PI_WORKSPACES_ROOT:./workspaces}
-    docker:
-      image: ${PI_DOCKER_IMAGE:pi-agent-sandbox:latest}
-      network: ${PI_DOCKER_NETWORK:bridge}
-      read-only-rootfs: ${PI_DOCKER_READONLY:true}
-      cpu-quota: ${PI_DOCKER_CPU_QUOTA:50000}
-      memory-limit: ${PI_DOCKER_MEMORY:256m}
-      pids-limit: ${PI_DOCKER_PIDS:100}
-      tmpfs:
-        tmp: ${PI_DOCKER_TMPFS_TMP:512m}
-        var-tmp: ${PI_DOCKER_TMPFS_VAR_TMP:128m}
-        run: ${PI_DOCKER_TMPFS_RUN:64m}
   tool-policy:
     # ORCHESTRATOR 角色是否启用严格模式
     # false（默认）：主代理拥有全部工具类目（READONLY / MUTATING / EXECUTABLE / INSTRUCTIONAL / ORCHESTRATION）

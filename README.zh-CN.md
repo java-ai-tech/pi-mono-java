@@ -12,6 +12,9 @@
 - SSE 流式输出
 - MongoDB 会话持久化
 - 多租户 namespace 隔离
+- Run 级队列控制（`interrupt` / `followup` / `steer` / `drop` / `reject`）
+- 工具策略管线（工具清单、租户策略过滤、审计包装、执行包装）
+- Subagent 编排能力（planner / researcher / coder / reviewer / tester）
 - 可插拔模型/Provider 体系
 - Skill 目录加载与沙箱执行
 
@@ -49,13 +52,14 @@
 
 参考服务在 `AiProviderConfiguration` 中注册了以下模型：
 
-| Provider | Model IDs |
-| --- | --- |
-| `deepseek` | `deepseek-chat`, `deepseek-reasoner` |
-| `zhipuai` | `glm-4`, `glm-4-flash` |
+| Provider | Model IDs | Context / Max Tokens |
+| --- | --- | --- |
+| `deepseek` | `deepseek-v4-pro` (默认), `deepseek-v4-flash` | 1M / 256K |
+| `zhipuai` | `glm-4`, `glm-4-flash` | - |
 
 说明：
 
+- DeepSeek 模型已升级到 v4 系列，支持 reasoning 模式，上下文窗口 1M。
 - 虽然配置层支持 `OPENAI_API_KEY` 桥接，但当前参考服务默认未在模型目录中注册 OpenAI 模型。
 - 如需扩展，可新增 `ApiProvider` Bean 与 `ModelCatalog` 注册项。
 

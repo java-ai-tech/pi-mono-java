@@ -9,7 +9,7 @@ public record ChatStreamRequest(
     String prompt,
     String sessionId,
     String command,   // null=prompt, "steer"/"abort"/"compact"/"continue"/"fork"/"navigate"/"set_model"/"set_thinking"
-    String mode,      // null/"agent"=direct loop, "orchestrated"=plan+execute
+    String queueMode, // interrupt/followup/steer/drop/reject
     String provider,
     String modelId,
     String systemPrompt,
