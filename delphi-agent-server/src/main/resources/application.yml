@@ -5,39 +5,57 @@ spring:
     import: optional:file:.env[.properties]
   application:
     name: delphi-agent-server
-  ai:
-    openai:
-      api-key: ${OPENAI_API_KEY:}
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
 pi:
+  execution:
+    workspaces-root: ${PI_WORKSPACES_ROOT:./workspaces}
+    docker:
+      image: ${PI_DOCKER_IMAGE:pi-agent-sandbox:latest}
+      network: ${PI_DOCKER_NETWORK:bridge}
+      read-only-rootfs: ${PI_DOCKER_READONLY:true}
+      cpu-quota: ${PI_DOCKER_CPU_QUOTA:50000}
+      memory-limit: ${PI_DOCKER_MEMORY:256m}
+      pids-limit: ${PI_DOCKER_PIDS:100}
+      tmpfs:
+        tmp: ${PI_DOCKER_TMPFS_TMP:512m}
+        var-tmp: ${PI_DOCKER_TMPFS_VAR_TMP:128m}
+        run: ${PI_DOCKER_TMPFS_RUN:64m}
+  tool-policy:
+    # ORCHESTRATOR 角色是否启用严格模式
+    # false（默认）：主代理拥有全部工具类目（READONLY / MUTATING / EXECUTABLE / INSTRUCTIONAL / ORCHESTRATION）
+    #                适合单机演示、可信环境、快速原型
+    # true：主代理仅能 READONLY / INSTRUCTIONAL / ORCHESTRATION，
+    #       MUTATING / EXECUTABLE 必须通过 spawn CODER/TESTER subagent 完成
+    #       适合多租户生产环境、零信任架构
+    orchestrator-strict: ${PI_TOOL_POLICY_ORCHESTRATOR_STRICT:false}
   resources:
     skills-dirs: ${PI_AGENT_SKILLS_DIRS:./skills,${user.home}/.codex/skills}
     prompts-dirs: ${PI_AGENT_PROMPTS_DIRS:./prompts}
     resources-dirs: ${PI_AGENT_RESOURCES_DIRS:./resources}
   models:
-    - id: deepseek-chat
-      name: deepseek-chat
+    - id: deepseek-v4-pro
+      name: deepseek-v4-pro
       api: spring-ai-deepseek
       provider: deepseek
-      base-url: https://api.deepseek.com
+      base-url: https://api.deepseek.com/anthropic
       reasoning: false
       input: [text]
-      context-window: 64000
-      max-tokens: 8192
-    - id: deepseek-reasoner
-      name: deepseek-reasoner
+      context-window: 1048576
+      max-tokens: 262144
+    - id: deepseek-v4-flash
+      name: deepseek-v4-flash
       api: spring-ai-deepseek
       provider: deepseek
-      base-url: https://api.deepseek.com
-      reasoning: true
+      base-url: https://api.deepseek.com/anthropic
+      reasoning: false
       input: [text]
-      context-window: 64000
-      max-tokens: 8192
+      context-window: 1048576
+      max-tokens: 262144
   defaults:
     provider: deepseek
-    model-id: deepseek-chat
+    model-id: deepseek-v4-pro
   session:
     max-sessions: ${PI_SESSION_MAX:2000}
     idle-ttl-hours: ${PI_SESSION_IDLE_TTL_HOURS:24}
