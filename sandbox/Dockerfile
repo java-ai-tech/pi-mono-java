@@ -16,7 +16,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     vim nano less \
  && rm -rf /var/lib/apt/lists/*
 
-RUN pip3 install --no-cache-dir --break-system-packages \
+RUN pip3 install --no-cache-dir \
     requests \
     pyyaml \
     httpx \
