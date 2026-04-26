@@ -62,6 +62,21 @@ public class BuiltinToolFactory {
         return Optional.ofNullable(tool);
     }
 
+    public List<AgentTool> createAvailableTools(ExecutionContext context) {
+        if (properties == null || !properties.isEnabled()) {
+            return List.of();
+        }
+        List<String> available = normalizedUnique(properties.getAvailable(), FALLBACK_AVAILABLE);
+        List<AgentTool> tools = new ArrayList<>();
+        for (String name : available) {
+            AgentTool tool = createTool(name, context);
+            if (tool != null) {
+                tools.add(tool);
+            }
+        }
+        return tools;
+    }
+
     private AgentTool createTool(String name, ExecutionContext context) {
         return switch (name) {
             case "read" -> new ReadBuiltinTool(

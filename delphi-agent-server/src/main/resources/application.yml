@@ -1,13 +1,16 @@
 spring:
 #  profiles:
 #    active: local-dev
-  config:
+   ai:
+     openai:
+       api-key: ${OPENAI_API_KEY:}
+   config:
     import: optional:file:.env[.properties]
-  application:
-    name: delphi-agent-server
-  data:
-    mongodb:
-      uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
+    application:
+      name: delphi-agent-server
+    data:
+      mongodb:
+        uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
 pi:
   execution:
     workspaces-root: ${PI_WORKSPACES_ROOT:./workspaces}

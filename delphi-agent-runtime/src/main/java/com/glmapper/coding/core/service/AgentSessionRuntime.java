@@ -342,6 +342,14 @@ public class AgentSessionRuntime {
         };
     }
 
+    public void configureRunTools(com.glmapper.coding.core.runtime.AgentRunContext context) {
+        if (context == null) {
+            return;
+        }
+        validateNamespace(context.sessionId(), context.namespace());
+        lifecycleManager.touch(context.sessionId());
+    }
+
     public SessionStateSnapshot state(String sessionId, String namespace) {
         validateNamespace(sessionId, namespace);
         lifecycleManager.touch(sessionId);
