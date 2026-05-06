@@ -1,6 +1,18 @@
 package com.glmapper.agent.core;
 
-import com.glmapper.ai.api.*;
+import com.glmapper.ai.api.AssistantMessage;
+import com.glmapper.ai.api.AssistantMessageEvent;
+import com.glmapper.ai.api.AssistantMessageEventStream;
+import com.glmapper.ai.api.Context;
+import com.glmapper.ai.api.Message;
+import com.glmapper.ai.api.Model;
+import com.glmapper.ai.api.StopReason;
+import com.glmapper.ai.api.StreamOptions;
+import com.glmapper.ai.api.TextContent;
+import com.glmapper.ai.api.ThinkingLevel;
+import com.glmapper.ai.api.ToolCallContent;
+import com.glmapper.ai.api.ToolDefinition;
+import com.glmapper.ai.api.Usage;
 import com.glmapper.ai.spi.AiRuntime;
 
 import java.util.ArrayDeque;
@@ -18,6 +30,18 @@ import java.util.concurrent.Flow;
 import java.util.concurrent.atomic.AtomicReference;
 import java.util.function.Consumer;
 
+/**
+ * Agent 可编程的智能体，能够与语言模型交互，执行工具调用，并根据上下文进行推理和决策。
+ * Agent 维护一个消息历史记录和工具列表，支持外部输入引导（steering）和后续跟进（follow-up），并通过事件系统向外部暴露其内部状态和执行过程。
+ * Agent 的核心功能包括：
+ * - 处理用户输入和外部引导消息，生成适当的响应并更新状态。
+ * - 与 AiRuntime 集成，流式获取语言模型的响应，并在响应过程中处理工具调用。
+ * - 提供事件订阅机制，使得外部可以监听 Agent 的执行过程，包括消息生成、工具调用等关键事件。
+ * - 支持中途插入引导消息（steering）和后续消息（follow-up），以动态调整 Agent 的行为和响应。
+ *
+ * @author glmapper
+ * @Classname Agent
+ */
 public final class Agent {
     private final AiRuntime aiRuntime;
     private final AgentState state;
@@ -116,6 +140,15 @@ public final class Agent {
         this.aborted = true;
     }
 
+    /**
+     * runLoop 是 Agent 的核心执行循环，负责处理输入的 prompts，流式获取语言模型的响应，执行工具调用，并根据响应动态调整执行流程。
+     *
+     * @param prompts                 初始输入消息列表，通常由用户提供，用于引导 Agent 的行为。
+     * @param skipInitialSteeringPoll 是否跳过初始的 steering 消息轮询。
+     *                                如果为 true，Agent 将直接使用 options.steeringMessagesSupplier() 提供的消息，而不是先检查 steeringQueue 中是否有消息。这在某些情况下可以避免不必要的轮询，提高响应速度。
+     *                                如果为 false, Agent 将首先检查 steeringQueue 中是否有消息，如果有，则优先处理这些消息。这适用于需要动态插入 steering 消息的场景。
+     * @return
+     */
     private CompletableFuture<Void> runLoop(List<AgentMessage> prompts, boolean skipInitialSteeringPoll) {
         return CompletableFuture.runAsync(() -> {
             try {
@@ -137,7 +170,7 @@ public final class Agent {
 
                 List<AgentMessage> pending = skipInitialSteeringPoll ? List.of() : getSteeringMessages();
                 boolean firstTurn = true;
-
+                // 主循环：持续处理工具调用和生成消息，直到没有更多的工具调用或生成消息需要处理
                 while (true) {
                     boolean hasMoreToolCalls = true;
                     while (hasMoreToolCalls || !pending.isEmpty()) {
@@ -161,7 +194,8 @@ public final class Agent {
                         AgentAssistantMessage assistant = streamAssistantResponse(contextMessages);
                         newMessages.add(assistant);
 
-                        List<ToolCallContent> toolCalls = assistant.content().stream()
+                        List<ToolCallContent> toolCalls = assistant.content()
+                                .stream()
                                 .filter(ToolCallContent.class::isInstance)
                                 .map(ToolCallContent.class::cast)
                                 .toList();
@@ -196,20 +230,11 @@ public final class Agent {
                 emit(new AgentEvent.AgentEnd(newMessages));
             } catch (Exception ex) {
                 state.error(ex.getMessage());
-                String errorText = ex.getMessage() == null || ex.getMessage().isBlank()
-                        ? "Agent execution failed"
-                        : "Agent execution failed: " + ex.getMessage();
-                AgentAssistantMessage errorMessage = new AgentAssistantMessage(
-                        List.of(new TextContent(errorText, null)),
-                        state.model().api(),
-                        state.model().provider(),
-                        state.model().id(),
-                        Usage.empty(),
-                        aborted ? StopReason.ABORTED : StopReason.ERROR,
-                        ex.getMessage(),
-                        null,
-                        System.currentTimeMillis()
-                );
+                String errorText = ex.getMessage() == null || ex.getMessage()
+                        .isBlank() ? "Agent execution failed" : "Agent execution failed: " + ex.getMessage();
+                AgentAssistantMessage errorMessage = new AgentAssistantMessage(List.of(new TextContent(errorText, null)), state.model()
+                        .api(), state.model().provider(), state.model()
+                        .id(), Usage.empty(), aborted ? StopReason.ABORTED : StopReason.ERROR, ex.getMessage(), null, System.currentTimeMillis());
                 state.appendMessage(errorMessage);
                 emit(new AgentEvent.AgentEnd(List.of(errorMessage)));
             } finally {
@@ -227,25 +252,14 @@ public final class Agent {
                 .join();
 
         List<Message> llmMessages = options.convertToLlm().apply(transformed);
-        Context llmContext = new Context(state.systemPrompt(), llmMessages, state.tools().stream()
+        Context llmContext = new Context(state.systemPrompt(), llmMessages, state.tools()
+                .stream()
                 .map(tool -> new ToolDefinition(tool.name(), tool.description(), tool.parametersSchema()))
                 .toList());
 
         StreamOptions baseOptions = options.streamOptions();
         String apiKey = options.apiKeyResolver().apply(state.model().provider()).join();
-        StreamOptions requestOptions = new StreamOptions(
-                baseOptions.temperature(),
-                baseOptions.maxTokens(),
-                apiKey != null ? apiKey : baseOptions.apiKey(),
-                baseOptions.transport(),
-                baseOptions.cacheRetention(),
-                baseOptions.sessionId(),
-                baseOptions.maxRetryDelayMs(),
-                baseOptions.headers(),
-                baseOptions.metadata(),
-                state.thinkingLevel() == ThinkingLevel.OFF ? null : state.thinkingLevel(),
-                baseOptions.thinkingBudgets()
-        );
+        StreamOptions requestOptions = new StreamOptions(baseOptions.temperature(), baseOptions.maxTokens(), apiKey != null ? apiKey : baseOptions.apiKey(), baseOptions.transport(), baseOptions.cacheRetention(), baseOptions.sessionId(), baseOptions.maxRetryDelayMs(), baseOptions.headers(), baseOptions.metadata(), state.thinkingLevel() == ThinkingLevel.OFF ? null : state.thinkingLevel(), baseOptions.thinkingBudgets());
 
         AssistantMessageEventStream response = aiRuntime.streamSimple(state.model(), llmContext, requestOptions);
         CountDownLatch done = new CountDownLatch(1);
@@ -342,21 +356,11 @@ public final class Agent {
         return fallback;
     }
 
-    private List<AgentToolResultMessage> executeToolCalls(
-            List<AgentMessage> currentContext,
-            AgentAssistantMessage assistant,
-            List<ToolCallContent> toolCalls
-    ) {
-        return options.toolExecutionMode() == ToolExecutionMode.SEQUENTIAL
-                ? executeToolCallsSequential(currentContext, assistant, toolCalls)
-                : executeToolCallsParallel(currentContext, assistant, toolCalls);
+    private List<AgentToolResultMessage> executeToolCalls(List<AgentMessage> currentContext, AgentAssistantMessage assistant, List<ToolCallContent> toolCalls) {
+        return options.toolExecutionMode() == ToolExecutionMode.SEQUENTIAL ? executeToolCallsSequential(currentContext, assistant, toolCalls) : executeToolCallsParallel(currentContext, assistant, toolCalls);
     }
 
-    private List<AgentToolResultMessage> executeToolCallsSequential(
-            List<AgentMessage> currentContext,
-            AgentAssistantMessage assistant,
-            List<ToolCallContent> toolCalls
-    ) {
+    private List<AgentToolResultMessage> executeToolCallsSequential(List<AgentMessage> currentContext, AgentAssistantMessage assistant, List<ToolCallContent> toolCalls) {
         List<AgentToolResultMessage> results = new ArrayList<>();
         for (ToolCallContent call : toolCalls) {
             results.add(runSingleToolCall(currentContext, assistant, call).join());
@@ -364,11 +368,7 @@ public final class Agent {
         return results;
     }
 
-    private List<AgentToolResultMessage> executeToolCallsParallel(
-            List<AgentMessage> currentContext,
-            AgentAssistantMessage assistant,
-            List<ToolCallContent> toolCalls
-    ) {
+    private List<AgentToolResultMessage> executeToolCallsParallel(List<AgentMessage> currentContext, AgentAssistantMessage assistant, List<ToolCallContent> toolCalls) {
         List<CompletableFuture<AgentToolResultMessage>> futures = toolCalls.stream()
                 .map(call -> runSingleToolCall(currentContext, assistant, call))
                 .toList();
@@ -380,14 +380,11 @@ public final class Agent {
         return results;
     }
 
-    private CompletableFuture<AgentToolResultMessage> runSingleToolCall(
-            List<AgentMessage> currentContext,
-            AgentAssistantMessage assistant,
-            ToolCallContent call
-    ) {
+    private CompletableFuture<AgentToolResultMessage> runSingleToolCall(List<AgentMessage> currentContext, AgentAssistantMessage assistant, ToolCallContent call) {
         emit(new AgentEvent.ToolExecutionStart(call.id(), call.name(), call.arguments()));
 
-        AgentTool tool = state.tools().stream()
+        AgentTool tool = state.tools()
+                .stream()
                 .filter(candidate -> candidate.name().equals(call.name()))
                 .findFirst()
                 .orElse(null);
@@ -407,8 +404,7 @@ public final class Agent {
 
         AgentContext context = new AgentContext(state.systemPrompt(), currentContext, state.tools());
         BeforeToolCallResult before = options.beforeToolCall()
-                .apply(new BeforeToolCallContext(assistant, call, validatedArgs, context),
-                        new java.util.concurrent.CancellationException("before-tool-call"))
+                .apply(new BeforeToolCallContext(assistant, call, validatedArgs, context), new java.util.concurrent.CancellationException("before-tool-call"))
                 .join();
         if (before != null && before.block()) {
             AgentToolResult blocked = AgentToolResult.error(before.reason() != null ? before.reason() : "Tool execution blocked");
@@ -419,9 +415,7 @@ public final class Agent {
         pending.add(call.id());
         state.pendingToolCalls(pending);
 
-        return tool.execute(call.id(), validatedArgs, partial ->
-                emit(new AgentEvent.ToolExecutionUpdate(call.id(), call.name(), validatedArgs, partial)),
-                new java.util.concurrent.CancellationException("tool-cancel"))
+        return tool.execute(call.id(), validatedArgs, partial -> emit(new AgentEvent.ToolExecutionUpdate(call.id(), call.name(), validatedArgs, partial)), new java.util.concurrent.CancellationException("tool-cancel"))
                 .handle((result, throwable) -> {
                     AgentToolResult finalResult;
                     boolean isError;
@@ -434,15 +428,11 @@ public final class Agent {
                     }
 
                     AfterToolCallResult after = options.afterToolCall()
-                            .apply(new AfterToolCallContext(assistant, call, validatedArgs, finalResult, isError, context),
-                                    new java.util.concurrent.CancellationException("after-tool-call"))
+                            .apply(new AfterToolCallContext(assistant, call, validatedArgs, finalResult, isError, context), new java.util.concurrent.CancellationException("after-tool-call"))
                             .join();
 
                     if (after != null) {
-                        finalResult = new AgentToolResult(
-                                after.content() != null ? after.content() : finalResult.content(),
-                                after.details() != null ? after.details() : finalResult.details()
-                        );
+                        finalResult = new AgentToolResult(after.content() != null ? after.content() : finalResult.content(), after.details() != null ? after.details() : finalResult.details());
                         if (after.isError() != null) {
                             isError = after.isError();
                         }
@@ -458,14 +448,7 @@ public final class Agent {
 
     private AgentToolResultMessage emitToolResult(ToolCallContent call, AgentToolResult result, boolean isError) {
         emit(new AgentEvent.ToolExecutionEnd(call.id(), call.name(), result, isError));
-        AgentToolResultMessage message = new AgentToolResultMessage(
-                call.id(),
-                call.name(),
-                result.content(),
-                result.details(),
-                isError,
-                System.currentTimeMillis()
-        );
+        AgentToolResultMessage message = new AgentToolResultMessage(call.id(), call.name(), result.content(), result.details(), isError, System.currentTimeMillis());
         emit(new AgentEvent.MessageStart(message));
         emit(new AgentEvent.MessageEnd(message));
         return message;
@@ -511,6 +494,11 @@ public final class Agent {
         return all;
     }
 
+    /**
+     * 接收一个 AgentEvent，并将其分发给所有订阅的监听器。这个方法在 Agent 的执行过程中被调用，以通知外部关于 Agent 状态变化、消息生成、工具调用等事件。
+     *
+     * @param event
+     */
     private void emit(AgentEvent event) {
         for (Consumer<AgentEvent> listener : listeners) {
             listener.accept(event);

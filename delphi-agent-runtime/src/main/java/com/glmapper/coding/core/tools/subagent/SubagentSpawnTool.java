@@ -15,6 +15,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * SubagentSpawnTool 提供了一个工具接口，允许在当前Agent运行环境中动态创建和管理子Agent实例。
+ * 通过调用execute方法，用户可以指定子Agent的角色、任务描述、上下文信息、工作空间范围、运行模式和最大持续时间等参数，
+ * 从而灵活地生成适用于不同任务需求的子Agent。这些子Agent可以独立执行特定任务，并将结果返回给主Agent，实现复杂任务的分解和协作。
+ *
+ * @Classname SubagentSpawnTool
+ * @author glmapper
+ */
 public class SubagentSpawnTool implements AgentTool {
 
     private final SubagentRuntime subagentRuntime;

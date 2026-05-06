@@ -10,6 +10,7 @@ import java.util.Objects;
 import java.util.concurrent.CompletableFuture;
 
 public final class AiRuntime {
+
     private final ApiProviderRegistry providerRegistry;
 
     public AiRuntime(ApiProviderRegistry providerRegistry) {

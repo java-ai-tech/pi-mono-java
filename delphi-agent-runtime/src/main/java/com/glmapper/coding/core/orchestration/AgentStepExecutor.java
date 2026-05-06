@@ -32,23 +32,14 @@ public class AgentStepExecutor implements StepExecutor {
     }
 
     @Override
-    public PlanStepResult execute(
-            ExecutionPlan plan,
-            PlanStep step,
-            PlanExecutionContext context,
-            PlanExecutionObserver observer
-    ) {
+    public PlanStepResult execute(ExecutionPlan plan, PlanStep step, PlanExecutionContext context, PlanExecutionObserver observer) {
         Model model = modelCatalog.get(context.provider(), context.modelId())
-                .orElseThrow(() -> new IllegalArgumentException(
-                        "Model not found: " + context.provider() + "/" + context.modelId()));
+                .orElseThrow(() -> new IllegalArgumentException("Model not found: " + context.provider() + "/" + context.modelId()));
 
         Agent agent = new Agent(aiRuntime, model, com.glmapper.agent.core.AgentOptions.defaults());
         agent.state().systemPrompt(buildSystemPrompt(context.systemPrompt()));
-        agent.state().tools(agentToolFactory.createExecutionTools(
-                context.namespace(),
-                context.sessionId(),
-                buildToolSelectionContext(context, plan, step)
-        ));
+        agent.state()
+                .tools(agentToolFactory.createExecutionTools(context.namespace(), context.sessionId(), buildToolSelectionContext(context, plan, step)));
 
         final int[] lastTextLen = {0};
         agent.subscribe(event -> handleEvent(plan, step, observer, event, lastTextLen));
@@ -73,15 +64,8 @@ public class AgentStepExecutor implements StepExecutor {
         return PlanStepResult.failure("Agent step did not return a final assistant message");
     }
 
-    private void handleEvent(
-            ExecutionPlan plan,
-            PlanStep step,
-            PlanExecutionObserver observer,
-            AgentEvent event,
-            int[] lastTextLen
-    ) {
-        if (event instanceof AgentEvent.MessageUpdate update
-                && update.message() instanceof com.glmapper.agent.core.AgentAssistantMessage assistant) {
+    private void handleEvent(ExecutionPlan plan, PlanStep step, PlanExecutionObserver observer, AgentEvent event, int[] lastTextLen) {
+        if (event instanceof AgentEvent.MessageUpdate update && update.message() instanceof com.glmapper.agent.core.AgentAssistantMessage assistant) {
             String fullText = extractText(assistant.content());
             if (fullText.length() > lastTextLen[0]) {
                 String delta = fullText.substring(lastTextLen[0]);
@@ -91,8 +75,7 @@ public class AgentStepExecutor implements StepExecutor {
             return;
         }
 
-        if (event instanceof AgentEvent.MessageEnd end
-                && end.message() instanceof com.glmapper.agent.core.AgentAssistantMessage assistant) {
+        if (event instanceof AgentEvent.MessageEnd end && end.message() instanceof com.glmapper.agent.core.AgentAssistantMessage assistant) {
             String fullText = extractText(assistant.content());
             if (fullText.length() > lastTextLen[0]) {
                 String delta = fullText.substring(lastTextLen[0]);
@@ -108,14 +91,8 @@ public class AgentStepExecutor implements StepExecutor {
         }
 
         if (event instanceof AgentEvent.ToolExecutionEnd toolEnd) {
-            observer.onToolEnd(
-                    plan,
-                    step,
-                    toolEnd.toolCallId(),
-                    toolEnd.toolName(),
-                    extractText(toolEnd.result().content()),
-                    toolEnd.isError()
-            );
+            observer.onToolEnd(plan, step, toolEnd.toolCallId(), toolEnd.toolName(), extractText(toolEnd.result()
+                    .content()), toolEnd.isError());
         }
     }
 
@@ -137,40 +114,28 @@ public class AgentStepExecutor implements StepExecutor {
     private String buildStepPrompt(ExecutionPlan plan, PlanStep step, PlanExecutionContext context) {
         return """
                 执行当前任务步骤，不要重新规划。
-
+                
                 原始用户请求：
                 %s
-
+                
                 总体目标：
                 %s
-
+                
                 当前步骤：
                 %s
-
+                
                 步骤说明：
                 %s
-
+                
                 完成标准：
                 %s
-
+                
                 只完成当前步骤，并给出当前步骤的执行结果。
-                """.formatted(
-                context.originalPrompt(),
-                plan.goal(),
-                step.title(),
-                step.description(),
-                step.successCriteria()
-        );
+                """.formatted(context.originalPrompt(), plan.goal(), step.title(), step.description(), step.successCriteria());
     }
 
     private String buildToolSelectionContext(PlanExecutionContext context, ExecutionPlan plan, PlanStep step) {
-        return String.join("\n",
-                context.originalPrompt(),
-                plan.goal(),
-                step.title(),
-                step.description(),
-                step.successCriteria()
-        );
+        return String.join("\n", context.originalPrompt(), plan.goal(), step.title(), step.description(), step.successCriteria());
     }
 
     private String extractText(List<ContentBlock> content) {

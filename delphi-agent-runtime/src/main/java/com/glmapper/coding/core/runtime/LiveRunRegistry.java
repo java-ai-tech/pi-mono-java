@@ -7,6 +7,12 @@ import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.function.Consumer;
 
+/**
+ * 注册和管理当前活跃的Agent运行实例，支持通过会话ID或运行ID查询，提供中止和引导功能。
+ *
+ * @Classname LiveRunRegistry
+ * @author glmapper
+ */
 @Component
 public class LiveRunRegistry {
 

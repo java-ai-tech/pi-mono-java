@@ -10,6 +10,14 @@ import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
 
+/**
+ * ToolExecutionWrapper 提供了一个包装器，用于在工具执行过程中添加审计和策略决策功能。它通过包裹原始的 AgentTool 实例，
+ * 在工具执行前后记录执行结果、执行时长以及可能的异常信息，并根据工具策略的决策结果动态地允许或拒绝工具的执行。
+ * 这个包装器使得工具的使用更加透明和可控，便于后续的审计分析和策略优化。
+ *
+ * @Classname ToolExecutionWrapper
+ * @author glmapper
+ */
 @Component
 public class ToolExecutionWrapper {
 

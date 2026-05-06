@@ -19,7 +19,6 @@ import com.glmapper.coding.core.tools.policy.ToolRuntimeContext;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
-import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.concurrent.CompletableFuture;
@@ -28,6 +27,14 @@ import java.util.concurrent.TimeUnit;
 import java.util.concurrent.TimeoutException;
 import java.util.concurrent.atomic.AtomicInteger;
 
+/**
+ * SubagentRunner 负责管理和执行子 Agent 生命周期的组件。它提供一个 start 方法，在给定的SubagentContext和父Agent上下文的基础上启动一个新的子Agent实例。
+ * SubagentRunner 负责解析模型、构建系统提示、组合用户提示，并订阅子 Agent 的事件流以转发相关事件到 RuntimeEventSink。
+ * 同时，它还处理子 Agent 的超时和异常情况，确保子 Agent 能够在预定的时间内完成任务并正确返回结果。
+ *
+ * @author glmapper
+ * @Classname SubagentRunner
+ */
 @Component
 public class SubagentRunner {
 
@@ -37,11 +44,7 @@ public class SubagentRunner {
     private final ToolPolicyPipeline toolPolicyPipeline;
     private final RuntimeEventPublisher runtimeEventPublisher;
 
-    public SubagentRunner(AiRuntime aiRuntime,
-                          ModelCatalog modelCatalog,
-                          ToolInventory toolInventory,
-                          ToolPolicyPipeline toolPolicyPipeline,
-                          RuntimeEventPublisher runtimeEventPublisher) {
+    public SubagentRunner(AiRuntime aiRuntime, ModelCatalog modelCatalog, ToolInventory toolInventory, ToolPolicyPipeline toolPolicyPipeline, RuntimeEventPublisher runtimeEventPublisher) {
         this.aiRuntime = aiRuntime;
         this.modelCatalog = modelCatalog;
         this.toolInventory = toolInventory;
@@ -49,40 +52,28 @@ public class SubagentRunner {
         this.runtimeEventPublisher = runtimeEventPublisher;
     }
 
-    public ExecutionHandle start(SubagentContext subagentContext,
-                                 AgentRunContext parentContext,
-                                 RuntimeEventSink sink) {
+    /**
+     * 启动一个新的子 Agent 实例来执行给定的任务。负责解析模型、构建系统提示、组合用户提示，并订阅子 Agent 的事件流以转发相关事件到 RuntimeEventSink。
+     *
+     * @param subagentContext
+     * @param parentContext
+     * @param sink
+     * @return
+     */
+    public ExecutionHandle start(SubagentContext subagentContext, AgentRunContext parentContext, RuntimeEventSink sink) {
         Model model = resolveModel(parentContext);
         Agent agent = new Agent(aiRuntime, model, AgentOptions.defaults());
 
-        ToolRuntimeContext toolRuntimeContext = new ToolRuntimeContext(
-                subagentContext.tenantId(),
-                subagentContext.namespace(),
-                subagentContext.userId(),
-                subagentContext.projectKey(),
-                subagentContext.sessionId(),
-                subagentContext.parentRunId(),
-                subagentContext.subagentId(),
-                subagentContext.role(),
-                subagentContext.depth(),
-                subagentContext.workspaceScope()
-        );
+        ToolRuntimeContext toolRuntimeContext = new ToolRuntimeContext(subagentContext.tenantId(), subagentContext.namespace(), subagentContext.userId(), subagentContext.projectKey(), subagentContext.sessionId(), subagentContext.parentRunId(), subagentContext.subagentId(), subagentContext.role(), subagentContext.depth(), subagentContext.workspaceScope());
         agent.state().tools(toolPolicyPipeline.apply(toolRuntimeContext, toolInventory.collect(toolRuntimeContext)));
         agent.state().systemPrompt(buildSystemPrompt(subagentContext));
 
         AtomicInteger assistantTextLength = new AtomicInteger(0);
-        AutoCloseable subscription = agent.subscribe(event -> forwardEvent(
-                event,
-                parentContext,
-                sink,
-                subagentContext.subagentId(),
-                assistantTextLength
-        ));
+        AutoCloseable subscription = agent.subscribe(event -> forwardEvent(event, parentContext, sink, subagentContext.subagentId(), assistantTextLength));
 
         String prompt = composePrompt(subagentContext);
         CompletableFuture<Void> promptFuture = agent.prompt(prompt);
-        CompletableFuture<Void> timedPromptFuture = promptFuture
-                .orTimeout(subagentContext.maxDurationSeconds(), TimeUnit.SECONDS)
+        CompletableFuture<Void> timedPromptFuture = promptFuture.orTimeout(subagentContext.maxDurationSeconds(), TimeUnit.SECONDS)
                 .whenComplete((ignored, throwable) -> {
                     if (unwrap(throwable) instanceof TimeoutException) {
                         agent.abort();
@@ -94,39 +85,17 @@ public class SubagentRunner {
             if (throwable != null) {
                 Throwable root = unwrap(throwable);
                 SubagentStatus status = root instanceof TimeoutException ? SubagentStatus.FAILED : SubagentStatus.FAILED;
-                return new SubagentResult(
-                        subagentContext.subagentId(),
-                        subagentContext.parentRunId(),
-                        subagentContext.role(),
-                        status,
-                        null,
-                        root.getMessage(),
-                        subagentContext.startedAt(),
-                        Instant.now(),
-                        Map.of()
-                );
+                return new SubagentResult(subagentContext.subagentId(), subagentContext.parentRunId(), subagentContext.role(), status, null, root.getMessage(), subagentContext.startedAt(), Instant.now(), Map.of());
             }
             String summary = extractLastAssistantText(agent.state().messages());
-            return new SubagentResult(
-                    subagentContext.subagentId(),
-                    subagentContext.parentRunId(),
-                    subagentContext.role(),
-                    SubagentStatus.COMPLETED,
-                    summary,
-                    null,
-                    subagentContext.startedAt(),
-                    Instant.now(),
-                    Map.of("messageCount", agent.state().messages().size())
-            );
+            return new SubagentResult(subagentContext.subagentId(), subagentContext.parentRunId(), subagentContext.role(), SubagentStatus.COMPLETED, summary, null, subagentContext.startedAt(), Instant.now(), Map.of("messageCount", agent.state()
+                    .messages()
+                    .size()));
         });
         return new ExecutionHandle(agent, promptFuture, resultFuture);
     }
 
-    private void forwardEvent(AgentEvent event,
-                              AgentRunContext parentContext,
-                              RuntimeEventSink sink,
-                              String subagentId,
-                              AtomicInteger assistantTextLength) {
+    private void forwardEvent(AgentEvent event, AgentRunContext parentContext, RuntimeEventSink sink, String subagentId, AtomicInteger assistantTextLength) {
         if (event instanceof AgentEvent.MessageUpdate messageUpdate) {
             if (messageUpdate.message() instanceof AgentAssistantMessage assistant) {
                 String fullText = extractText(assistant.content());
@@ -134,49 +103,23 @@ public class SubagentRunner {
                 if (fullText.length() > previous) {
                     String delta = fullText.substring(previous);
                     assistantTextLength.set(fullText.length());
-                    runtimeEventPublisher.emitSubagent(
-                            sink,
-                            parentContext,
-                            subagentId,
-                            "subagent_message_delta",
-                            Map.of("delta", delta)
-                    );
+                    runtimeEventPublisher.emitSubagent(sink, parentContext, subagentId, "subagent_message_delta", Map.of("delta", delta));
                 }
             }
             return;
         }
         if (event instanceof AgentEvent.ToolExecutionStart toolExecutionStart) {
-            runtimeEventPublisher.emitSubagent(
-                    sink,
-                    parentContext,
-                    subagentId,
-                    "subagent_tool_started",
-                    Map.of(
-                            "toolName", toolExecutionStart.toolName(),
-                            "toolCallId", toolExecutionStart.toolCallId()
-                    )
-            );
+            runtimeEventPublisher.emitSubagent(sink, parentContext, subagentId, "subagent_tool_started", Map.of("toolName", toolExecutionStart.toolName(), "toolCallId", toolExecutionStart.toolCallId()));
             return;
         }
         if (event instanceof AgentEvent.ToolExecutionEnd toolExecutionEnd) {
-            runtimeEventPublisher.emitSubagent(
-                    sink,
-                    parentContext,
-                    subagentId,
-                    "subagent_tool_completed",
-                    Map.of(
-                            "toolName", toolExecutionEnd.toolName(),
-                            "toolCallId", toolExecutionEnd.toolCallId(),
-                            "isError", toolExecutionEnd.isError()
-                    )
-            );
+            runtimeEventPublisher.emitSubagent(sink, parentContext, subagentId, "subagent_tool_completed", Map.of("toolName", toolExecutionEnd.toolName(), "toolCallId", toolExecutionEnd.toolCallId(), "isError", toolExecutionEnd.isError()));
         }
     }
 
     private Model resolveModel(AgentRunContext parentContext) {
         if (parentContext.provider() != null && parentContext.modelId() != null) {
-            return modelCatalog.get(parentContext.provider(), parentContext.modelId())
-                    .orElseGet(() -> firstModel());
+            return modelCatalog.get(parentContext.provider(), parentContext.modelId()).orElseGet(() -> firstModel());
         }
         return firstModel();
     }
@@ -192,10 +135,12 @@ public class SubagentRunner {
     private String buildSystemPrompt(SubagentContext context) {
         String rolePrompt = switch (context.role()) {
             case PLANNER -> "You are a planner subagent. Focus on decomposition and step ordering.";
-            case RESEARCHER -> "You are a researcher subagent. Focus on collecting and summarizing facts from workspace context.";
+            case RESEARCHER ->
+                    "You are a researcher subagent. Focus on collecting and summarizing facts from workspace context.";
             case REVIEWER -> "You are a reviewer subagent. Focus on risks, regressions, and correctness.";
             case CODER -> "You are a coder subagent. Implement changes precisely and verify with commands when needed.";
-            case TESTER -> "You are a tester subagent. Focus on deterministic test execution and concise failure analysis.";
+            case TESTER ->
+                    "You are a tester subagent. Focus on deterministic test execution and concise failure analysis.";
             case ORCHESTRATOR -> "You are an orchestrator subagent. Delegate only when policy allows.";
         };
         return rolePrompt + "\nKeep all work strictly inside assigned tenant/session workspace boundaries.";
@@ -255,10 +200,7 @@ public class SubagentRunner {
         }
     }
 
-    public record ExecutionHandle(
-            Agent agent,
-            CompletableFuture<Void> promptFuture,
-            CompletableFuture<SubagentResult> resultFuture
-    ) {
+    public record ExecutionHandle(Agent agent, CompletableFuture<Void> promptFuture,
+                                  CompletableFuture<SubagentResult> resultFuture) {
     }
 }
