@@ -45,6 +45,12 @@ public class TenantRuntimeGuard {
         requireSession(context.namespace(), context.sessionId());
     }
 
+    /**
+     * 检查租户和用户的并发运行配额，抛出QuotaRejectedException表示超出配额限制
+     *
+     * @param context        运行上下文，必须包含namespace和可选的userId
+     * @param liveRunRegistry 活跃运行注册表，用于查询当前活跃运行数量
+     */
     public void ensureCanStartRun(AgentRunContext context, LiveRunRegistry liveRunRegistry) {
         TenantQuota quota = tenantQuotaManager.resolve(context.namespace());
         int tenantActive = liveRunRegistry.activeCountByTenant(context.namespace());

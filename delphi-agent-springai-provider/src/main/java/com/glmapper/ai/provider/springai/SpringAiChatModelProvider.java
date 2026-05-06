@@ -31,7 +31,7 @@ public final class SpringAiChatModelProvider implements ApiProvider {
             FluxToEventStreamBridge.bridge(flux, stream, model);
         } catch (Exception ex) {
             AssistantMessage error = new AssistantMessage(
-                    java.util.List.of(new TextContent("", null)),
+                    java.util.List.of(new TextContent("Provider request failed: " + safeMessage(ex), null)),
                     model.api(), model.provider(), model.id(),
                     Usage.empty(), StopReason.ERROR, ex.getMessage(), null,
                     System.currentTimeMillis()
@@ -39,5 +39,12 @@ public final class SpringAiChatModelProvider implements ApiProvider {
             stream.push(new AssistantMessageEvent.Error(StopReason.ERROR, error));
         }
         return stream;
+    }
+
+    private static String safeMessage(Exception ex) {
+        if (ex == null || ex.getMessage() == null || ex.getMessage().isBlank()) {
+            return "unknown error";
+        }
+        return ex.getMessage();
     }
 }

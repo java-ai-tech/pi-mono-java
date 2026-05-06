@@ -30,6 +30,17 @@ public class ToolInventory {
         this.executionBackend = executionBackend;
     }
 
+    /**
+     * 根据工具运行时上下文收集可用工具列表，包含以下步骤：
+     * 1. 根据上下文信息计算有效的会话ID，支持不同的工作空间范围
+     * 2. 创建执行上下文，包含命名空间、会话ID和用户ID等信息
+     * 3. 收集内置工具，并根据工具名称分类
+     * 4. 收集技能工具，根据技能信息创建对应的工具实例，并根据是否可执行分类
+     * 5. 如果是规划者或编排者角色，添加任务规划工具
+     *
+     * @param context 工具运行时上下文，包含命名空间、用户ID、会话ID、子代理角色等信息
+     * @return 收集到的工具列表，每个工具包含其类别、来源和资源标识等元信息
+     */
     public List<Item> collect(ToolRuntimeContext context) {
         List<Item> items = new ArrayList<>();
         String effectiveSessionId = workspaceExecutionId(context);

@@ -196,8 +196,11 @@ public final class Agent {
                 emit(new AgentEvent.AgentEnd(newMessages));
             } catch (Exception ex) {
                 state.error(ex.getMessage());
+                String errorText = ex.getMessage() == null || ex.getMessage().isBlank()
+                        ? "Agent execution failed"
+                        : "Agent execution failed: " + ex.getMessage();
                 AgentAssistantMessage errorMessage = new AgentAssistantMessage(
-                        List.of(new TextContent("", null)),
+                        List.of(new TextContent(errorText, null)),
                         state.model().api(),
                         state.model().provider(),
                         state.model().id(),

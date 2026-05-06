@@ -48,6 +48,15 @@ public class AgentToolFactory {
         return createTools(context);
     }
 
+    /**
+     * 根据工具运行时上下文创建工具列表，包含以下步骤：
+     * 1. 从工具库存收集符合上下文条件的工具
+     * 2. 如果是编排子代理角色，添加编排专用工具
+     * 3. 通过工具政策管道过滤和排序工具
+     *
+     * @param context 工具运行时上下文，包含命名空间、会话ID、子代理角色等信息
+     * @return 创建的工具列表，已根据政策过滤和排序
+     */
     public List<AgentTool> createTools(ToolRuntimeContext context) {
         List<ToolInventory.Item> inventoryItems = new ArrayList<>(toolInventory.collect(context));
         if (subagentOrchestrationToolFactory != null && context.agentRole() == SubagentRole.ORCHESTRATOR) {

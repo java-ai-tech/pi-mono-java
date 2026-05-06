@@ -30,6 +30,9 @@ final class PromptConverter {
             for (Message msg : context.messages()) {
                 if (msg instanceof com.glmapper.ai.api.UserMessage user) {
                     String text = extractText(user.content());
+                    if (text.isBlank()) {
+                        continue;
+                    }
                     messages.add(new org.springframework.ai.chat.messages.UserMessage(text));
                 } else if (msg instanceof com.glmapper.ai.api.AssistantMessage assistant) {
                     String text = extractText(assistant.content());
@@ -41,10 +44,13 @@ final class PromptConverter {
                         }
                     }
                     if (toolCalls.isEmpty()) {
+                        if (text.isBlank()) {
+                            continue;
+                        }
                         messages.add(new org.springframework.ai.chat.messages.AssistantMessage(text));
                     } else {
                         messages.add(org.springframework.ai.chat.messages.AssistantMessage.builder()
-                                .content(text)
+                                .content(text.isBlank() ? "Tool call requested." : text)
                                 .toolCalls(toolCalls)
                                 .build());
                     }
@@ -54,7 +60,7 @@ final class PromptConverter {
                             .responses(List.of(new ToolResponseMessage.ToolResponse(
                                     toolResult.toolCallId(),
                                     toolResult.toolName(),
-                                    resultText)))
+                                    resultText.isBlank() ? "(empty tool result)" : resultText)))
                             .build());
                 }
             }
@@ -101,9 +107,9 @@ final class PromptConverter {
         }
         StringBuilder sb = new StringBuilder();
         for (ContentBlock block : blocks) {
-            if (block instanceof TextContent text) {
+            if (block instanceof TextContent text && text.text() != null && !text.text().isBlank()) {
                 if (!sb.isEmpty()) sb.append(" ");
-                sb.append(text.text());
+                sb.append(text.text().trim());
             }
         }
         return sb.toString();

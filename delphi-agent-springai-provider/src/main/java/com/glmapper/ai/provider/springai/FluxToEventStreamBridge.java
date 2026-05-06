@@ -91,8 +91,11 @@ final class FluxToEventStreamBridge {
     }
 
     private static void handleError(Throwable error, DefaultAssistantMessageEventStream stream, StreamState state) {
+        String text = !state.textBuffer.isEmpty()
+                ? state.textBuffer.toString()
+                : "Provider stream failed: " + safeMessage(error);
         AssistantMessage errorMsg = new AssistantMessage(
-                List.of(new TextContent(state.textBuffer.toString(), null)),
+                List.of(new TextContent(text, null)),
                 state.model.api(), state.model.provider(), state.model.id(),
                 state.usage, StopReason.ERROR, error.getMessage(), null,
                 System.currentTimeMillis()
@@ -123,6 +126,9 @@ final class FluxToEventStreamBridge {
         for (ToolCallState tcs : state.activeToolCalls.values()) {
             content.add(new ToolCallContent(tcs.id, tcs.name, parseArgs(tcs.argsBuffer.toString()), null));
         }
+        if (content.isEmpty()) {
+            content.add(new TextContent("(empty assistant response)", null));
+        }
 
         AssistantMessage finalMessage = new AssistantMessage(
                 content, state.model.api(), state.model.provider(), state.model.id(),
@@ -140,6 +146,13 @@ final class FluxToEventStreamBridge {
             case "TOOL_CALLS", "TOOL_USE" -> StopReason.TOOL_USE;
             default -> StopReason.STOP;
         };
+    }
+
+    private static String safeMessage(Throwable error) {
+        if (error == null || error.getMessage() == null || error.getMessage().isBlank()) {
+            return "unknown error";
+        }
+        return error.getMessage();
     }
 
     @SuppressWarnings("unchecked")

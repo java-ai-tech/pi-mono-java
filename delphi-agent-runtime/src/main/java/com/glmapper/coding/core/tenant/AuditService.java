@@ -27,7 +27,13 @@ public class AuditService {
     }
 
     /**
-     * Records an audit event asynchronously.
+     * 记录审计日志，包含业务命名空间、用户ID、会话ID、操作类型和额外详情信息
+     *
+     * @param namespace 业务命名空间，必填
+     * @param userId    用户ID，选填
+     * @param sessionId 会话ID，选填
+     * @param action    操作类型，必填
+     * @param details   额外详情信息，选填
      */
     public void record(String namespace, String userId, String sessionId,
                         String action, Map<String, Object> details) {

@@ -92,17 +92,32 @@ public class AgentRunRuntime {
         return true;
     }
 
+    /**
+     * 基于排队策略调度执行，包含以下几种情况：
+     * 1. 立即执行（RUN_NOW）：如果没有活跃的运行，则立即执行新的运行。
+     * 2. 中断并执行（INTERRUPT）：如果有活跃的运行，根据策略中断当前运行并立即执行新的运行。
+     * 3. 排队等待（ENQUEUE）：如果有活跃的运行，根据策略将新的运行加入队列，等待前一个运行完成后再执行。
+     * 4. 引导调整（STEER）：如果有活跃的运行，根据策略引导用户调整输入（如提示用户修改提示词），以满足执行条件。
+     * 5. 拒绝执行（REJECT）：如果有活跃的运行，根据策略拒绝新的运行请求，并向用户返回相应的提示信息。
+     *
+     * @param context
+     * @param sink
+     */
     private void dispatchByQueuePolicy(AgentRunContext context, RuntimeEventSink sink) {
         Optional<LiveRunRegistry.ActiveRun> active = liveRunRegistry.findBySession(context.namespace(), context.sessionId());
         RunQueueDecision decision = runQueueManager.decide(context, active.isPresent());
+        // 记录队列决策，包含是否立即执行、加入队列、拒绝执行等
         runtimeAuditService.recordQueueDecision(context, decision);
-
+        // 根据决策结果调度执行
         switch (decision.type()) {
+            // 如果没有活跃运行，或策略允许立即执行，则直接调度执行
             case RUN_NOW -> scheduleRun(context, sink);
+            // 如果有活跃运行，且策略为中断并执行，则先中断当前运行，再调度执行
             case INTERRUPT -> {
                 active.ifPresent(r -> r.abort("interrupted_by_new_run"));
                 scheduleRun(context, sink);
             }
+            // 如果有活跃运行，且策略为排队等待，则将新的运行加入队列，等待前一个运行完成后再执行
             case ENQUEUE -> {
                 tenantRuntimeGuard.ensureQueueCapacity(context, runQueueManager);
                 int queueSize = runQueueManager.enqueue(context, sink);
@@ -112,6 +127,7 @@ public class AgentRunRuntime {
                         "queueSize", queueSize
                 ));
             }
+            // 如果有活跃运行，且策略为引导调整，则引导用户调整输入（如提示用户修改提示词），以满足执行条件
             case STEER -> {
                 boolean steered = steer(context.namespace(), context.sessionId(), context.prompt());
                 eventPublisher.emit(sink, context, "queue_updated", Map.of(
@@ -120,20 +136,48 @@ public class AgentRunRuntime {
                         "steered", steered
                 ));
             }
+            // 如果有活跃运行，且策略为拒绝执行，则拒绝新的运行请求，并向用户返回相应的提示信息
             case DROP -> eventPublisher.emit(sink, context, "queue_updated", Map.of(
                     "runId", context.runId(),
                     "decision", decision.type().name(),
                     "dropped", true
             ));
+            // 如果有活跃运行，且策略为拒绝执行，则拒绝新的运行请求，并向用户返回相应的提示信息
             case REJECT -> emitQuotaRejected(context, sink, decision.reason());
         }
     }
 
+    /**
+     * 调度执行运行，包含以下步骤：
+     * 1. 注册活跃运行：将当前运行注册到活跃运行注册表中，以便进行管理和监控。
+     * 2. 发布运行开始事件：向事件发布器发布运行开始事件，通知相关系统和组件。
+     * 3. 配置运行工具：根据运行上下文配置所需的工具和资源。
+     * 4. 订阅运行事件：订阅运行过程中产生的事件，以便进行转发和处理。
+     * 5. 执行提示词：执行用户输入的提示词，驱动代理进行交互和操作。
+     * 6. 发布运行完成事件：向事件发布器发布运行完成事件，通知相关系统和组件。
+     * 7. 错误处理：捕获和处理运行过程中发生的异常，发布运行失败事件，并记录审计日志。
+     *
+     * @param context
+     * @param sink
+     */
     private void scheduleRun(AgentRunContext context, RuntimeEventSink sink) {
         tenantRuntimeGuard.ensureCanStartRun(context, liveRunRegistry);
         CompletableFuture.runAsync(() -> executeRun(context, sink), runExecutor);
     }
 
+    /**
+     * 执行运行的具体逻辑，包含以下步骤：
+     * 1. 注册活跃运行：将当前运行注册到活跃运行注册表中，以便进行管理和监控。
+     * 2. 发布运行开始事件：向事件发布器发布运行开始事件，通知相关系统和组件。
+     * 3. 配置运行工具：根据运行上下文配置所需的工具和资源。
+     * 4. 订阅运行事件：订阅运行过程中产生的事件，以便进行转发和处理。
+     * 5. 执行提示词：执行用户输入的提示词，驱动代理进行交互和操作。
+     * 6. 发布运行完成事件：向事件发布器发布运行完成事件，通知相关系统和组件。
+     * 7. 错误处理：捕获和处理运行过程中发生的异常，发布运行失败事件，并记录审计日志。
+     *
+     * @param context
+     * @param sink
+     */
     private void executeRun(AgentRunContext context, RuntimeEventSink sink) {
         AtomicInteger lastAssistantTextLength = new AtomicInteger(0);
         AutoCloseable subscription = null;
@@ -161,7 +205,9 @@ public class AgentRunRuntime {
                     "tenantId", context.tenantId(),
                     "sessionId", context.sessionId()
             ));
+            // 记录运行开始事件，包含运行ID、租户ID、会话ID等信息
             runtimeAuditService.recordRunStarted(context);
+            // 根据运行上下文配置所需的工具和资源，如连接外部系统、加载知识库等
             sessionRuntime.configureRunTools(context);
 
             subscription = sessionRuntime.subscribeEvents(context.sessionId(), context.namespace(),

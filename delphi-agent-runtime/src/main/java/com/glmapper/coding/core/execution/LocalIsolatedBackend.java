@@ -23,7 +23,7 @@ public class LocalIsolatedBackend implements ExecutionBackend {
     private final Path workspacesRoot;
 
     public LocalIsolatedBackend(
-            @Value("${pi.execution.workspaces-root:${PI_WORKSPACES_ROOT:./workspaces}}") String workspacesRoot
+            @Value("${pi.execution.workspaces-root:${PI_WORKSPACES_ROOT:workspaces}}") String workspacesRoot
     ) {
         this.workspacesRoot = Paths.get(workspacesRoot).toAbsolutePath();
         try {

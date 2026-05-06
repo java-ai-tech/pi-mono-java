@@ -10,7 +10,7 @@
 - Catalog：按目录加载 skills、prompts、resources，并支持 namespace 可见性。
 - Provider 抽象：通过 `AiRuntime` + `ApiProvider` + `ModelCatalog` 接入模型。
 
-主要技术架构图见 [ARCHITECHE.MD](./ARCHITECHE.MD)，API 文档见 [DOCS.md](./DOCS.md)。
+主要技术架构图见 [ARCHITECHE.MD](./ARCHITECHE.MD)，API / SDK 文档见 [DOCS.md](./DOCS.md)。
 
 ## 工程结构
 
@@ -96,6 +96,14 @@ curl http://localhost:8080/api/catalog/models
 ## HTTP API
 
 API 入口、请求头、SSE 事件和命令清单集中维护在 [DOCS.md](./DOCS.md)，完整接口说明见 [docs/api-reference.zh-CN.md](./docs/api-reference.zh-CN.md)。
+
+## Agent SDK
+
+如果你是在同一个 Spring 容器内以嵌入式方式接入 `delphi-agent`，优先使用 `delphi-agent-runtime` 提供的 `DelphiCodingAgentSdk`，而不是走 HTTP/SSE。
+
+- SDK 使用手册：[docs/agent-sdk.zh-CN.md](./docs/agent-sdk.zh-CN.md)
+- 适用场景：平台内编排服务、业务工作流、进程内事件订阅、会话树控制
+- 核心入口：`DelphiCodingAgentSdk`、`CreateAgentSessionOptions`、`AgentSessionHandle`
 
 ## Agent Loop
 

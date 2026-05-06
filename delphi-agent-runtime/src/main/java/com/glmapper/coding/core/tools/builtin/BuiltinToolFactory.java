@@ -15,7 +15,13 @@ import java.util.Set;
 
 @Component
 public class BuiltinToolFactory {
+    /**
+     * 内置工具的名称列表，作为默认可用工具和默认启用工具的回退选项
+     */
     private static final List<String> FALLBACK_AVAILABLE = List.of("read", "bash", "edit", "write", "grep", "find", "ls");
+    /**
+     * 默认启用的内置工具名称列表，作为配置缺失时的回退选项，优先级低于配置中的 defaultEnabled 字段
+     */
     private static final List<String> FALLBACK_DEFAULT_ENABLED = List.of("read", "bash", "edit", "write");
 
     private final ExecutionBackend executionBackend;
@@ -117,6 +123,12 @@ public class BuiltinToolFactory {
         };
     }
 
+    /**
+     * 对输入的工具名称列表进行归一化处理，去除空白、转换为小写，并去重。对于 null 或空列表，使用提供的回退列表作为来源。
+     * @param input
+     * @param fallback
+     * @return
+     */
     private List<String> normalizedUnique(List<String> input, List<String> fallback) {
         List<String> source = (input == null || input.isEmpty()) ? fallback : input;
         List<String> output = new ArrayList<>();

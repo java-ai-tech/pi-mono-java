@@ -1,10 +1,14 @@
 # Delphi Agent API Docs
 
-`DOCS.md` 只作为 API 文档入口。技术架构图请看 [ARCHITECHE.MD](./ARCHITECHE.MD)，项目使用说明请看 [README.md](./README.md)。
+`DOCS.md` 只作为 API / SDK 文档入口。技术架构图请看 [ARCHITECHE.MD](./ARCHITECHE.MD)，项目使用说明请看 [README.md](./README.md)。
 
 ## API Reference
 
 - [API Reference (中文)](./docs/api-reference.zh-CN.md)
+
+## SDK Reference
+
+- [Agent SDK 使用手册（中文）](./docs/agent-sdk.zh-CN.md)
 
 ## API Surface
 

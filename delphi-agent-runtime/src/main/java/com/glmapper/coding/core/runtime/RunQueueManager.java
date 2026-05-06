@@ -13,6 +13,13 @@ public class RunQueueManager {
 
     private final ConcurrentHashMap<String, Queue<QueuedRun>> queues = new ConcurrentHashMap<>();
 
+    /**
+     * 决策是否立即执行新任务，或将其加入队列，或拒绝执行
+     *
+     * @param context      运行上下文
+     * @param hasActiveRun 是否已有活跃运行
+     * @return 决策结果
+     */
     public RunQueueDecision decide(AgentRunContext context, boolean hasActiveRun) {
         if (!hasActiveRun) {
             return RunQueueDecision.runNow();

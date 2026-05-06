@@ -151,9 +151,21 @@ public class AgentSessionRuntime {
         return id;
     }
 
+    /**
+     * 处理用户输入的prompt，返回一个CompletableFuture表示该prompt的处理结果（成功或失败）
+     * 该方法会将prompt提交到SessionPromptQueue中排队执行，确保同一会话的prompt按顺序执行且不会并发执行
+     * 在执行prompt时，会更新会话的生命周期状态，并在完成后持久化对话内容和记录审计日志
+     *
+     * @param sessionId 会话ID
+     * @param namespace 业务命名空间
+     * @param text      用户输入的文本内容
+     * @return CompletableFuture<Void> 表示该prompt处理完成的异步结果
+     */
     public CompletableFuture<Void> prompt(String sessionId, String namespace, String text) {
         validateNamespace(sessionId, namespace);
+        // 触生命周期，确保会话不过期
         lifecycleManager.touch(sessionId);
+        // 将prompt提交到队列中执行，确保同一会话的prompt按顺序执行且不会并发执行
         return promptQueue.submit(sessionId, () -> {
             Agent agent = getOrCreateLiveAgent(sessionId);
             String runId = UUID.randomUUID().toString();
@@ -370,11 +382,18 @@ public class AgentSessionRuntime {
         return getOrCreateLiveAgent(sessionId).state().messages();
     }
 
+    /**
+     * 配置会话的工具列表，通常在会话开始前调用一次，或在运行过程中动态调整工具能力时调用
+     * 该方法会根据当前会话状态和系统提示构建工具上下文，并通过AgentToolFactory创建工具实例，最后更新Agent的状态
+     *
+     * @param context 包含会话ID、命名空间、用户ID、项目Key等信息的运行上下文
+     */
     public void configureRunTools(AgentRunContext context) {
         validateNamespace(context.sessionId(), context.namespace());
         lifecycleManager.touch(context.sessionId());
         SessionDocument session = sessionRepository.findById(context.sessionId())
                 .orElseThrow(() -> new IllegalArgumentException("Session not found: " + context.sessionId()));
+        // 创建工具上下文并构建工具列表，工具上下文包含会话的系统提示、当前消息列表等信息，工具工厂可以根据上下文动态决定提供哪些工具实例
         Agent agent = getOrCreateLiveAgent(context.sessionId());
         ToolRuntimeContext toolContext = new ToolRuntimeContext(
                 context.tenantId(),
@@ -388,8 +407,12 @@ public class AgentSessionRuntime {
                 0,
                 WorkspaceScope.SESSION
         );
+        // 工具工厂可以根据上下文动态决定提供哪些工具实例，例如根据系统提示中的工具需求、当前消息内容中的工具调用等信息来调整工具列表，从而实现更灵活和智能的工具配置
         List<AgentTool> tools = agentToolFactory.createTools(toolContext);
+        // 将工具列表更新到Agent的状态中，Agent在执行过程中可以根据状态中的工具列表来决定是否允许调用某个工具，以及如何调用工具，从而实现工具能力的动态调整和控制
         agent.state().tools(tools);
+        // 根据当前会话状态和系统提示构建工具上下文时，可能会涉及到对系统提示中工具需求的解析、对当前消息列表中工具调用的分析等逻辑，这些逻辑可以在工具工厂内部实现，
+        // 也可以在AgentSessionRuntime中实现后传递给工具工厂，以便工具工厂更好地理解当前会话的工具需求和使用场景，从而提供更合适的工具实例
         agent.state().systemPrompt(buildSystemPrompt(session.getSystemPrompt(), tools));
     }
 
@@ -654,6 +677,14 @@ public class AgentSessionRuntime {
         return agent;
     }
 
+    /**
+     * 构建系统提示，包含用户自定义的系统提示和针对工具使用的指导说明
+     * 该方法会根据提供的工具列表生成一段详细的工具使用指南，明确工具的调用时机和使用规则，从而引导Agent正确地使用工具来满足用户需求
+     *
+     * @param userPrompt 用户自定义的系统提示，通常包含对Agent角色、行为、限制等方面的说明
+     * @param tools      当前会话可用的工具列表，Agent可以调用这些工具来执行特定的操作或获取特定的信息
+     * @return 构建好的系统提示字符串，将被设置到Agent的状态中供其在执行过程中参考和遵循
+     */
     private String buildSystemPrompt(String userPrompt, List<AgentTool> tools) {
         StringBuilder sb = new StringBuilder();
 
@@ -667,12 +698,12 @@ public class AgentSessionRuntime {
 
                 """);
 
-        // User-provided system prompt
+        // 用户自定义提示
         if (userPrompt != null && !userPrompt.isBlank()) {
             sb.append(userPrompt.trim()).append("\n\n");
         }
 
-        // Tool usage guidance
+        // 工具使用指导，构建一个可用的工具列表和使用规则，指导Agent在何时以及如何使用工具来满足用户需求，同时避免过度依赖工具或滥用工具，从而实现更智能和高效的工具调用
         if (tools != null && !tools.isEmpty()) {
             sb.append("## Tool Usage Guidelines\n\n");
             sb.append("You have access to the following tools. Follow these rules strictly:\n\n");

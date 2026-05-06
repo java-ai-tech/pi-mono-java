@@ -41,6 +41,11 @@ public class RuntimeAuditService {
         record(context, "run_failed", details);
     }
 
+    /**
+     * 记录队列决策，包含是否立即执行、加入队列、拒绝执行等
+     * @param context 运行上下文
+     * @param decision 队列决策结果，允许为null，表示未决策或不适用
+     */
     public void recordQueueDecision(AgentRunContext context, RunQueueDecision decision) {
         Map<String, Object> details = new LinkedHashMap<>();
         details.put("runId", context.runId());
@@ -83,6 +88,12 @@ public class RuntimeAuditService {
         auditService.record(record.namespace(), record.userId(), record.sessionId(), "tool_execution", details);
     }
 
+    /**
+     * 统一记录方法，自动添加tenantId和projectKey到details中（如果上下文中有且details中未覆盖）
+     * @param context 运行上下文
+     * @param action 事件类型，如"run_started"、"queue_decision"等
+     * @param details 事件详情，允许为null
+     */
     public void record(AgentRunContext context, String action, Map<String, Object> details) {
         if (auditService == null || context == null) {
             return;
