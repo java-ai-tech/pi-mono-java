@@ -8,6 +8,17 @@ spring:
   data:
     mongodb:
       uri: ${MONGODB_URI:mongodb://localhost:27017/pi-agent-framework}
+    redis:
+      host: ${REDIS_HOST:localhost}
+      port: ${REDIS_PORT:6379}
+      password: ${REDIS_PASSWORD:}
+      timeout: ${REDIS_TIMEOUT:3000ms}
+      lettuce:
+        pool:
+          enabled: true
+          max-active: ${REDIS_POOL_MAX_ACTIVE:16}
+          max-idle: ${REDIS_POOL_MAX_IDLE:8}
+          min-idle: ${REDIS_POOL_MIN_IDLE:2}
 pi:
   tool-policy:
     # ORCHESTRATOR 角色是否启用严格模式
@@ -107,12 +118,33 @@ pi:
   metering:
     enabled: true
     flush-interval-seconds: 30
+  cluster:
+    # 多机部署开关
+    # false（默认）：保留内存实现，单机本地开发
+    # true：启用 Redis 协调，启动时强制校验 Redis 可达和 nodeId 唯一
+    enabled: ${PI_CLUSTER_ENABLED:false}
+    # 可选 nodeId 覆盖；建议通过 POD_NAME / HOSTNAME 由编排平台注入，多实例共享配置不要写死此值
+    node-id: ${PI_CLUSTER_NODE_ID:}
+    redis:
+      key-prefix: ${PI_CLUSTER_REDIS_KEY_PREFIX:delphi}
+    lock:
+      default-ttl-ms: ${PI_CLUSTER_LOCK_DEFAULT_TTL_MS:30000}
+    run:
+      max-ttl-ms: ${PI_CLUSTER_RUN_MAX_TTL_MS:1800000}
+    command-timeout-ms: ${PI_CLUSTER_COMMAND_TIMEOUT_MS:5000}
 
 management:
   endpoints:
     web:
       exposure:
         include: health,info,metrics,prometheus
+  endpoint:
+    health:
+      show-details: always
+      show-components: always
+  health:
+    redis:
+      enabled: ${PI_CLUSTER_ENABLED:false}
 
 server:
   port: ${PORT:8080}

@@ -18,7 +18,7 @@ class TenantQuotaManagerTest {
                 List.of(), null, null, null, null, List.of(),
                 null,
                 new PiAgentProperties.QuotaConfig(true, defaults, Map.of()),
-                null, null
+                null, null, null
         );
 
         TenantQuotaManager manager = new TenantQuotaManager(props);
@@ -42,7 +42,7 @@ class TenantQuotaManagerTest {
                 List.of(), null, null, null, null, List.of(),
                 null,
                 new PiAgentProperties.QuotaConfig(true, defaults, Map.of("premium-tenant", premium)),
-                null, null
+                null, null, null
         );
 
         TenantQuotaManager manager = new TenantQuotaManager(props);
@@ -61,7 +61,7 @@ class TenantQuotaManagerTest {
                 List.of(), null, null, null, null, List.of(),
                 null,
                 new PiAgentProperties.QuotaConfig(false, null, null),
-                null, null
+                null, null, null
         );
 
         TenantQuotaManager manager = new TenantQuotaManager(props);
@@ -75,7 +75,7 @@ class TenantQuotaManagerTest {
     void resolveHandlesNullQuotaConfig() {
         PiAgentProperties props = new PiAgentProperties(
                 List.of(), null, null, null, null, List.of(),
-                null, null, null, null
+                null, null, null, null, null
         );
 
         TenantQuotaManager manager = new TenantQuotaManager(props);

@@ -15,7 +15,8 @@ public record PiAgentProperties(
     RateLimitConfig rateLimit,
     QuotaConfig quota,
     AuditConfig audit,
-    MeteringConfig metering
+    MeteringConfig metering,
+    ClusterConfig cluster
 ) {
     public record ModelConfig(
         String id, String name, String api, String provider, String baseUrl,
@@ -30,4 +31,16 @@ public record PiAgentProperties(
     public record QuotaDefaults(int maxConcurrentSessions, long dailyTokenLimit, long cpuQuota, String memoryLimit, int pidsLimit) {}
     public record AuditConfig(boolean enabled) {}
     public record MeteringConfig(boolean enabled, int flushIntervalSeconds) {}
+    public record ClusterConfig(
+        boolean enabled,
+        String nodeId,
+        RedisConfig redis,
+        LockConfig lock,
+        RunConfig run,
+        int commandTimeoutMs
+    ) {
+        public record RedisConfig(String keyPrefix) {}
+        public record LockConfig(long defaultTtlMs) {}
+        public record RunConfig(long maxTtlMs) {}
+    }
 }
