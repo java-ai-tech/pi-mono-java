@@ -8,8 +8,8 @@ import com.glmapper.coding.core.domain.CreateSessionCommand;
 import com.glmapper.coding.core.runtime.AgentRunRequest;
 import com.glmapper.coding.core.runtime.AgentRunRuntime;
 import com.glmapper.coding.core.runtime.RunQueueMode;
-import com.glmapper.coding.core.runtime.RuntimeEvent;
 import com.glmapper.coding.core.service.AgentSessionRuntime;
+import com.glmapper.coding.http.api.config.SessionEventBroker;
 import com.glmapper.coding.http.api.dto.ChatStreamRequest;
 import jakarta.validation.Valid;
 import org.springframework.beans.factory.annotation.Value;
@@ -21,9 +21,8 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 import org.springframework.web.servlet.mvc.method.annotation.SseEmitter;
 
-import java.io.IOException;
-import java.util.LinkedHashMap;
 import java.util.Map;
+import java.util.UUID;
 
 @RestController
 @RequestMapping("/api/chat")
@@ -33,6 +32,7 @@ public class StreamChatController {
     private final AgentRunRuntime agentRunRuntime;
     private final ModelCatalog modelCatalog;
     private final RuntimeIdentityResolver identityResolver;
+    private final SessionEventBroker eventBroker;
     private final long streamTimeoutMs;
     private final long commandTimeoutMs;
 
@@ -40,12 +40,14 @@ public class StreamChatController {
                                 AgentRunRuntime agentRunRuntime,
                                 ModelCatalog modelCatalog,
                                 RuntimeIdentityResolver identityResolver,
+                                SessionEventBroker eventBroker,
                                 @Value("${pi.http.chat.stream-timeout-ms:0}") long streamTimeoutMs,
                                 @Value("${pi.http.chat.command-timeout-ms:30000}") long commandTimeoutMs) {
         this.sessionRuntime = sessionRuntime;
         this.agentRunRuntime = agentRunRuntime;
         this.modelCatalog = modelCatalog;
         this.identityResolver = identityResolver;
+        this.eventBroker = eventBroker;
         this.streamTimeoutMs = streamTimeoutMs;
         this.commandTimeoutMs = commandTimeoutMs;
     }
@@ -62,8 +64,12 @@ public class StreamChatController {
             return executeCommand(request, sessionId, identity);
         }
 
-        SseEmitter emitter = new SseEmitter(streamTimeoutMs);
+        String runId = "run_" + UUID.randomUUID().toString().replace("-", "");
+        SseEmitter emitter = eventBroker.register(
+                identity.namespace(), sessionId, runId, streamTimeoutMs);
+
         AgentRunRequest runRequest = new AgentRunRequest(
+                runId,
                 identity.tenantId(),
                 identity.namespace(),
                 identity.userId(),
@@ -79,15 +85,14 @@ public class StreamChatController {
                 )
         );
 
-        agentRunRuntime.stream(runRequest, event -> sendRuntimeEvent(emitter, event));
+        agentRunRuntime.stream(runRequest, eventBroker);
 
-        emitter.onError(error -> emitter.completeWithError(error));
-        emitter.onTimeout(emitter::complete);
         return emitter;
     }
 
     private SseEmitter executeCommand(ChatStreamRequest request, String sessionId, RuntimeIdentity identity) {
-        SseEmitter emitter = new SseEmitter(commandTimeoutMs);
+        SseEmitter emitter = eventBroker.registerCommand(
+                identity.namespace(), sessionId, commandTimeoutMs);
         try {
             Object ackData = handleCommand(request, sessionId, identity);
             emitter.send(SseEmitter.event().name("ack").data(ackData));
@@ -164,34 +169,6 @@ public class StreamChatController {
                 modelId,
                 request.systemPrompt()
         ));
-    }
-
-    private void sendRuntimeEvent(SseEmitter emitter, RuntimeEvent event) {
-        try {
-            emitter.send(SseEmitter.event().name(event.name()).data(toSseData(event)));
-            if ("run_completed".equals(event.name())
-                    || "run_failed".equals(event.name())
-                    || "quota_rejected".equals(event.name())) {
-                emitter.complete();
-            }
-        } catch (IOException e) {
-            emitter.completeWithError(e);
-        }
-    }
-
-    private Map<String, Object> toSseData(RuntimeEvent event) {
-        Map<String, Object> payload = new LinkedHashMap<>();
-        payload.put("eventId", event.eventId());
-        payload.put("name", event.name());
-        payload.put("runId", event.runId());
-        payload.put("tenantId", event.tenantId());
-        payload.put("namespace", event.namespace());
-        payload.put("userId", event.userId());
-        payload.put("sessionId", event.sessionId());
-        payload.put("subagentId", event.subagentId());
-        payload.put("timestamp", event.timestamp() == null ? null : event.timestamp().toString());
-        payload.put("data", event.payload() == null ? Map.of() : event.payload());
-        return payload;
     }
 
     private RunQueueMode parseQueueMode(String queueMode) {
