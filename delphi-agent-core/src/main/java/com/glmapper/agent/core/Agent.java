@@ -193,7 +193,7 @@ public final class Agent {
 
                         AgentAssistantMessage assistant = streamAssistantResponse(contextMessages);
                         newMessages.add(assistant);
-
+                        // 检查响应中是否包含工具调用，如果有，则执行这些工具调用，并将结果作为新的消息添加到上下文中，以便在下一轮生成中使用
                         List<ToolCallContent> toolCalls = assistant.content()
                                 .stream()
                                 .filter(ToolCallContent.class::isInstance)

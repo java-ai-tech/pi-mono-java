@@ -12,6 +12,7 @@ import com.glmapper.coding.core.runtime.RuntimeEvent;
 import com.glmapper.coding.core.service.AgentSessionRuntime;
 import com.glmapper.coding.http.api.dto.ChatStreamRequest;
 import jakarta.validation.Valid;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.MediaType;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -32,15 +33,21 @@ public class StreamChatController {
     private final AgentRunRuntime agentRunRuntime;
     private final ModelCatalog modelCatalog;
     private final RuntimeIdentityResolver identityResolver;
+    private final long streamTimeoutMs;
+    private final long commandTimeoutMs;
 
     public StreamChatController(AgentSessionRuntime sessionRuntime,
                                 AgentRunRuntime agentRunRuntime,
                                 ModelCatalog modelCatalog,
-                                RuntimeIdentityResolver identityResolver) {
+                                RuntimeIdentityResolver identityResolver,
+                                @Value("${pi.http.chat.stream-timeout-ms:0}") long streamTimeoutMs,
+                                @Value("${pi.http.chat.command-timeout-ms:30000}") long commandTimeoutMs) {
         this.sessionRuntime = sessionRuntime;
         this.agentRunRuntime = agentRunRuntime;
         this.modelCatalog = modelCatalog;
         this.identityResolver = identityResolver;
+        this.streamTimeoutMs = streamTimeoutMs;
+        this.commandTimeoutMs = commandTimeoutMs;
     }
 
     @PostMapping(value = "/stream", produces = MediaType.TEXT_EVENT_STREAM_VALUE)
@@ -55,7 +62,7 @@ public class StreamChatController {
             return executeCommand(request, sessionId, identity);
         }
 
-        SseEmitter emitter = new SseEmitter(300_000L);
+        SseEmitter emitter = new SseEmitter(streamTimeoutMs);
         AgentRunRequest runRequest = new AgentRunRequest(
                 identity.tenantId(),
                 identity.namespace(),
@@ -80,7 +87,7 @@ public class StreamChatController {
     }
 
     private SseEmitter executeCommand(ChatStreamRequest request, String sessionId, RuntimeIdentity identity) {
-        SseEmitter emitter = new SseEmitter(30_000L);
+        SseEmitter emitter = new SseEmitter(commandTimeoutMs);
         try {
             Object ackData = handleCommand(request, sessionId, identity);
             emitter.send(SseEmitter.event().name("ack").data(ackData));

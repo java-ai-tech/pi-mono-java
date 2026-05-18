@@ -53,6 +53,13 @@ pi:
     default-keep-count: 20
   planning:
     timeout-seconds: ${PI_PLANNING_TIMEOUT:45}
+  http:
+    # 0 means no Spring MVC async timeout; agent runs can legitimately exceed several minutes.
+    async-request-timeout-ms: ${PI_HTTP_ASYNC_REQUEST_TIMEOUT_MS:0}
+    chat:
+      # 0 keeps the SSE connection open until the run emits a terminal event or the client disconnects.
+      stream-timeout-ms: ${PI_HTTP_CHAT_STREAM_TIMEOUT_MS:0}
+      command-timeout-ms: ${PI_HTTP_CHAT_COMMAND_TIMEOUT_MS:60000}
   tools:
     builtin:
       enabled: ${PI_TOOLS_BUILTIN_ENABLED:true}
