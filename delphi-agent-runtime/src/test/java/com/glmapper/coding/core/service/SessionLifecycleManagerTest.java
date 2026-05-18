@@ -101,7 +101,7 @@ class SessionLifecycleManagerTest {
 
         // Wait a bit and touch
         Thread.sleep(50);
-        manager.touch("s-1");
+        manager.touch("s-1", "default");
 
         // Wait until original creation time would expire but touched time hasn't
         Thread.sleep(180);
@@ -129,7 +129,7 @@ class SessionLifecycleManagerTest {
     void reapShouldNotRemoveActiveRunSessions() throws InterruptedException {
         manager = new SessionLifecycleManager(10, Duration.ofMillis(100), Duration.ofMinutes(5));
         Agent agent = manager.getOrCreate("s-1", "default", this::mockAgent, this::noopSubscription);
-        manager.setActiveRun("s-1", "run-1");
+        manager.setActiveRun("s-1", "default", "run-1");
 
         Thread.sleep(150);
         manager.reapIdleSessions();
@@ -158,7 +158,7 @@ class SessionLifecycleManagerTest {
     void removeShouldRemoveSession() {
         manager = new SessionLifecycleManager(10, Duration.ofHours(1), Duration.ofMinutes(5));
         Agent agent = manager.getOrCreate("s-1", "default", this::mockAgent, this::noopSubscription);
-        manager.remove("s-1");
+        manager.remove("s-1", "default");
 
         // Re-create should produce a new agent
         Agent newAgent = manager.getOrCreate("s-1", "default", this::mockAgent, this::noopSubscription);

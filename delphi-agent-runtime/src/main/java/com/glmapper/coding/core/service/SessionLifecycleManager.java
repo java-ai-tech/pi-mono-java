@@ -90,7 +90,8 @@ public class SessionLifecycleManager {
             Supplier<Agent> agentFactory,
             Supplier<AutoCloseable> subscriptionFactory
     ) {
-        ManagedSession managed = sessions.computeIfAbsent(sessionId, key -> {
+        String key = compositeKey(namespace, sessionId);
+        ManagedSession managed = sessions.computeIfAbsent(key, k -> {
             // Check if we need to evict before creating
             if (sessions.size() >= maxSessions) {
                 evictOldestIdle();
@@ -99,15 +100,15 @@ public class SessionLifecycleManager {
             AutoCloseable subscription = subscriptionFactory.get();
             return new ManagedSession(sessionId, namespace, agent, subscription, Instant.now());
         });
-        touch(sessionId);
+        touch(sessionId, namespace);
         return managed.agent;
     }
 
     /**
      * Update last touched timestamp.
      */
-    public void touch(String sessionId) {
-        ManagedSession managed = sessions.get(sessionId);
+    public void touch(String sessionId, String namespace) {
+        ManagedSession managed = sessions.get(compositeKey(namespace, sessionId));
         if (managed != null) {
             managed.lastTouchedAt.set(Instant.now());
         }
@@ -116,8 +117,8 @@ public class SessionLifecycleManager {
     /**
      * Set active run ID for a session.
      */
-    public void setActiveRun(String sessionId, String runId) {
-        ManagedSession managed = sessions.get(sessionId);
+    public void setActiveRun(String sessionId, String namespace, String runId) {
+        ManagedSession managed = sessions.get(compositeKey(namespace, sessionId));
         if (managed != null) {
             managed.activeRunId.set(runId);
         }
@@ -126,8 +127,8 @@ public class SessionLifecycleManager {
     /**
      * Clear active run ID for a session.
      */
-    public void clearActiveRun(String sessionId) {
-        ManagedSession managed = sessions.get(sessionId);
+    public void clearActiveRun(String sessionId, String namespace) {
+        ManagedSession managed = sessions.get(compositeKey(namespace, sessionId));
         if (managed != null) {
             managed.activeRunId.set(null);
         }
@@ -171,7 +172,7 @@ public class SessionLifecycleManager {
             if (onEvict != null) {
                 onEvict.accept(oldest);
             }
-            sessions.remove(oldest.sessionId);
+            sessions.remove(compositeKey(oldest.namespace, oldest.sessionId));
             closeSession(oldest);
         }
     }
@@ -179,11 +180,15 @@ public class SessionLifecycleManager {
     /**
      * Remove a specific session.
      */
-    public void remove(String sessionId) {
-        ManagedSession managed = sessions.remove(sessionId);
+    public void remove(String sessionId, String namespace) {
+        ManagedSession managed = sessions.remove(compositeKey(namespace, sessionId));
         if (managed != null) {
             closeSession(managed);
         }
+    }
+
+    private static String compositeKey(String namespace, String sessionId) {
+        return (namespace == null ? "" : namespace) + ":" + sessionId;
     }
 
     /**

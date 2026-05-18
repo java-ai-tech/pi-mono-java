@@ -6,6 +6,7 @@ import com.glmapper.coding.core.runtime.LiveRunRegistry;
 import com.glmapper.coding.core.runtime.RuntimeEventSink;
 import com.glmapper.coding.core.tenant.TenantQuota;
 import com.glmapper.coding.core.tenant.TenantQuotaManager;
+import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
@@ -15,6 +16,9 @@ import org.springframework.stereotype.Component;
 import java.util.Map;
 import java.util.Optional;
 import java.util.concurrent.ConcurrentHashMap;
+import java.util.concurrent.Executors;
+import java.util.concurrent.ScheduledExecutorService;
+import java.util.concurrent.TimeUnit;
 
 @Component
 @ConditionalOnProperty(prefix = "pi.cluster", name = "enabled", havingValue = "true")
@@ -27,17 +31,28 @@ public class DistributedLiveRunRegistry implements LiveRunRegistry {
     private final StringRedisTemplate redisTemplate;
     private final ClusterKeyRegistry keyRegistry;
     private final TenantQuotaManager tenantQuotaManager;
+    private final ScheduledExecutorService renewExecutor;
 
     public DistributedLiveRunRegistry(RunAdmissionController admissionController,
                                       RunCommandDispatcher commandDispatcher,
                                       StringRedisTemplate redisTemplate,
                                       ClusterKeyRegistry keyRegistry,
-                                      TenantQuotaManager tenantQuotaManager) {
+                                      TenantQuotaManager tenantQuotaManager,
+                                      PiAgentProperties properties) {
         this.admissionController = admissionController;
         this.commandDispatcher = commandDispatcher;
         this.redisTemplate = redisTemplate;
         this.keyRegistry = keyRegistry;
         this.tenantQuotaManager = tenantQuotaManager;
+        this.renewExecutor = Executors.newSingleThreadScheduledExecutor(r -> {
+            Thread t = new Thread(r, "run-lease-renewal");
+            t.setDaemon(true);
+            return t;
+        });
+        long ttlMs = properties.cluster().run().maxTtlMs();
+        long intervalMs = Math.max(1_000L, Math.min(30_000L, ttlMs / 3));
+        this.renewExecutor.scheduleAtFixedRate(this::renewLocalRuns,
+                intervalMs, intervalMs, TimeUnit.MILLISECONDS);
     }
 
     @Override
@@ -69,9 +84,42 @@ public class DistributedLiveRunRegistry implements LiveRunRegistry {
 
     @Override
     public Optional<ActiveRun> findBySession(String namespace, String sessionId) {
-        return localHandles.values().stream()
+        // First check local handles
+        Optional<ActiveRun> local = localHandles.values().stream()
                 .filter(r -> namespace.equals(r.namespace()) && sessionId.equals(r.sessionId()))
                 .findFirst();
+        if (local.isPresent()) {
+            return local;
+        }
+
+        // If not found locally, check Redis for remote run
+        String bySessionKey = keyRegistry.runBySessionKey(namespace, sessionId);
+        String runId = redisTemplate.opsForValue().get(bySessionKey);
+        if (runId == null) {
+            return Optional.empty();
+        }
+
+        // Found a remote run, fetch its metadata
+        String activeRunKey = keyRegistry.activeRunKey(runId);
+        Map<Object, Object> fields = redisTemplate.opsForHash().entries(activeRunKey);
+        if (fields.isEmpty()) {
+            return Optional.empty();
+        }
+
+        // Create a stub ActiveRun that delegates abort/steer to remote node via command dispatcher
+        String userId = (String) fields.get("userId");
+
+        return Optional.of(new ActiveRun(
+                runId,
+                namespace,
+                sessionId,
+                namespace, // tenantId = namespace
+                userId == null || userId.isEmpty() ? null : userId,
+                null, // context not available for remote runs
+                null, // sink not available for remote runs
+                reason -> commandDispatcher.sendAbort(namespace, sessionId, reason),
+                text -> commandDispatcher.sendSteer(namespace, sessionId, text)
+        ));
     }
 
     @Override
@@ -95,22 +143,24 @@ public class DistributedLiveRunRegistry implements LiveRunRegistry {
 
     @Override
     public boolean abortSession(String namespace, String sessionId, String reason) {
-        Optional<ActiveRun> local = findBySession(namespace, sessionId);
-        if (local.isPresent()) {
-            local.get().abort(reason);
+        // findBySession returns either local handle or remote stub; both delegate abort correctly
+        Optional<ActiveRun> run = findBySession(namespace, sessionId);
+        if (run.isPresent()) {
+            run.get().abort(reason);
             return true;
         }
-        return commandDispatcher.sendAbort(namespace, sessionId, reason);
+        return false;
     }
 
     @Override
     public boolean steerSession(String namespace, String sessionId, String text) {
-        Optional<ActiveRun> local = findBySession(namespace, sessionId);
-        if (local.isPresent()) {
-            local.get().steer(text);
+        // findBySession returns either local handle or remote stub; both delegate steer correctly
+        Optional<ActiveRun> run = findBySession(namespace, sessionId);
+        if (run.isPresent()) {
+            run.get().steer(text);
             return true;
         }
-        return commandDispatcher.sendSteer(namespace, sessionId, text);
+        return false;
     }
 
     public static class AdmissionRejectedException extends RuntimeException {
@@ -121,5 +171,27 @@ public class DistributedLiveRunRegistry implements LiveRunRegistry {
 
     Map<String, ActiveRun> localHandlesRef() {
         return localHandles;
+    }
+
+    @PreDestroy
+    public void shutdown() {
+        renewExecutor.shutdownNow();
+    }
+
+    private void renewLocalRuns() {
+        for (ActiveRun run : localHandles.values()) {
+            try {
+                boolean renewed = admissionController.renew(
+                        run.runId(), run.namespace(), run.sessionId(), run.userId());
+                if (!renewed) {
+                    log.warn("Lost run lease, aborting local run: namespace={}, sessionId={}, runId={}",
+                            run.namespace(), run.sessionId(), run.runId());
+                    run.abort("run_lease_lost");
+                }
+            } catch (Exception e) {
+                log.warn("Failed to renew run lease: namespace={}, sessionId={}, runId={}",
+                        run.namespace(), run.sessionId(), run.runId(), e);
+            }
+        }
     }
 }

@@ -23,6 +23,7 @@ public class RunAdmissionController {
 
     private final DefaultRedisScript<Long> acquireScript;
     private final DefaultRedisScript<Long> releaseScript;
+    private final DefaultRedisScript<Long> renewScript;
 
     public RunAdmissionController(StringRedisTemplate redisTemplate,
                                   ClusterKeyRegistry keyRegistry,
@@ -34,6 +35,7 @@ public class RunAdmissionController {
         this.runTtlMs = properties.cluster().run().maxTtlMs();
         this.acquireScript = buildAcquireScript();
         this.releaseScript = buildReleaseScript();
+        this.renewScript = buildRenewScript();
     }
 
     public AdmissionResult acquire(AgentRunContext context, int maxTenantConcurrent, int maxUserConcurrent) {
@@ -80,8 +82,27 @@ public class RunAdmissionController {
         redisTemplate.execute(
                 releaseScript,
                 List.of(activeRunKey, bySessionKey, tenantActiveKey, userActiveKey),
-                runId
+                runId,
+                nodeIdentity.getNodeId()
         );
+    }
+
+    public boolean renew(String runId, String namespace, String sessionId, String userId) {
+        String activeRunKey = keyRegistry.activeRunKey(runId);
+        String bySessionKey = keyRegistry.runBySessionKey(namespace, sessionId);
+        String tenantActiveKey = keyRegistry.tenantActiveCountKey(namespace);
+        String userActiveKey = keyRegistry.userActiveCountKey(namespace, userId == null ? "" : userId);
+
+        Long result = redisTemplate.execute(
+                renewScript,
+                List.of(activeRunKey, bySessionKey, tenantActiveKey, userActiveKey),
+                runId,
+                nodeIdentity.getNodeId(),
+                userId == null ? "" : userId,
+                String.valueOf(runTtlMs),
+                String.valueOf(System.currentTimeMillis())
+        );
+        return result != null && result == 1L;
     }
 
     public enum AdmissionResult {
@@ -149,11 +170,54 @@ public class RunAdmissionController {
                 local tenantActiveKey = KEYS[3]
                 local userActiveKey = KEYS[4]
                 local runId = ARGV[1]
-                redis.call('DEL', activeRunKey)
-                redis.call('DEL', bySessionKey)
+                local nodeId = ARGV[2]
+                local ownerNodeId = redis.call('HGET', activeRunKey, 'nodeId')
+                if ownerNodeId and ownerNodeId ~= nodeId then
+                    return 0
+                end
+                if ownerNodeId then
+                    redis.call('DEL', activeRunKey)
+                end
+                if redis.call('GET', bySessionKey) == runId then
+                    redis.call('DEL', bySessionKey)
+                end
                 redis.call('SREM', tenantActiveKey, runId)
                 redis.call('SREM', userActiveKey, runId)
                 return 0
+                """;
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptText(lua);
+        script.setResultType(Long.class);
+        return script;
+    }
+
+    private DefaultRedisScript<Long> buildRenewScript() {
+        String lua = """
+                local activeRunKey = KEYS[1]
+                local bySessionKey = KEYS[2]
+                local tenantActiveKey = KEYS[3]
+                local userActiveKey = KEYS[4]
+                local runId = ARGV[1]
+                local nodeId = ARGV[2]
+                local userId = ARGV[3]
+                local ttlMs = tonumber(ARGV[4])
+                local heartbeatAt = ARGV[5]
+                local ownerNodeId = redis.call('HGET', activeRunKey, 'nodeId')
+                if not ownerNodeId or ownerNodeId ~= nodeId then
+                    return 0
+                end
+                local currentRunId = redis.call('GET', bySessionKey)
+                if currentRunId and currentRunId ~= runId then
+                    return 0
+                end
+                redis.call('HSET', activeRunKey, 'heartbeatAt', heartbeatAt)
+                redis.call('PEXPIRE', activeRunKey, ttlMs)
+                redis.call('SET', bySessionKey, runId, 'PX', ttlMs)
+                redis.call('PEXPIRE', tenantActiveKey, ttlMs)
+                if userId ~= '' then
+                    redis.call('PEXPIRE', userActiveKey, ttlMs)
+                end
+                return 1
                 """;
         DefaultRedisScript<Long> script = new DefaultRedisScript<>();
         script.setScriptText(lua);
