@@ -8,6 +8,8 @@ public interface SubagentStateRepository extends MongoRepository<SubagentStateDo
 
     List<SubagentStateDocument> findByNamespaceAndParentRunId(String namespace, String parentRunId);
 
+    List<SubagentStateDocument> findByParentRunId(String parentRunId);
+
     List<SubagentStateDocument> findByNamespaceAndSessionIdAndStatus(String namespace, String sessionId, String status);
 
     List<SubagentStateDocument> findByNamespaceAndParentRunIdAndStatus(String namespace, String parentRunId, String status);

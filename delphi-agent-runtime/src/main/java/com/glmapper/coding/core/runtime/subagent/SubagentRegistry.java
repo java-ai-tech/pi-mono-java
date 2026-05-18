@@ -103,7 +103,7 @@ public class SubagentRegistry {
             return List.of();
         }
         try {
-            return repo.findByNamespaceAndParentRunId("*", parentRunId).stream()
+            return repo.findByParentRunId(parentRunId).stream()
                     .map(this::resultFromDoc).toList();
         } catch (Exception e) {
             log.warn("Failed to list subagents from Mongo by parentRunId: {}", parentRunId, e);

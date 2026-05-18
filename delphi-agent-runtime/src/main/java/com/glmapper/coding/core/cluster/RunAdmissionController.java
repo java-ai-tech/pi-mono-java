@@ -87,15 +87,20 @@ public class RunAdmissionController {
         );
     }
 
-    public boolean renew(String runId, String namespace, String sessionId) {
+    public boolean renew(String runId, String namespace, String sessionId, String userId) {
         String activeRunKey = keyRegistry.activeRunKey(runId);
         String bySessionKey = keyRegistry.runBySessionKey(namespace, sessionId);
         String tenantActiveKey = keyRegistry.tenantActiveCountKey(namespace);
+        String userActiveKey = keyRegistry.userActiveCountKey(namespace, userId == null ? "" : userId);
 
         Long result = redisTemplate.execute(
                 renewScript,
-                List.of(activeRunKey, bySessionKey, tenantActiveKey),
-                String.valueOf(runTtlMs)
+                List.of(activeRunKey, bySessionKey, tenantActiveKey, userActiveKey),
+                runId,
+                nodeIdentity.getNodeId(),
+                userId == null ? "" : userId,
+                String.valueOf(runTtlMs),
+                String.valueOf(System.currentTimeMillis())
         );
         return result != null && result == 1L;
     }
@@ -170,8 +175,12 @@ public class RunAdmissionController {
                 if ownerNodeId and ownerNodeId ~= nodeId then
                     return 0
                 end
-                redis.call('DEL', activeRunKey)
-                redis.call('DEL', bySessionKey)
+                if ownerNodeId then
+                    redis.call('DEL', activeRunKey)
+                end
+                if redis.call('GET', bySessionKey) == runId then
+                    redis.call('DEL', bySessionKey)
+                end
                 redis.call('SREM', tenantActiveKey, runId)
                 redis.call('SREM', userActiveKey, runId)
                 return 0
@@ -187,14 +196,28 @@ public class RunAdmissionController {
                 local activeRunKey = KEYS[1]
                 local bySessionKey = KEYS[2]
                 local tenantActiveKey = KEYS[3]
-                local ttlMs = tonumber(ARGV[1])
-                if redis.call('EXISTS', activeRunKey) == 1 then
-                    redis.call('PEXPIRE', activeRunKey, ttlMs)
-                    redis.call('PEXPIRE', bySessionKey, ttlMs)
-                    redis.call('PEXPIRE', tenantActiveKey, ttlMs)
-                    return 1
+                local userActiveKey = KEYS[4]
+                local runId = ARGV[1]
+                local nodeId = ARGV[2]
+                local userId = ARGV[3]
+                local ttlMs = tonumber(ARGV[4])
+                local heartbeatAt = ARGV[5]
+                local ownerNodeId = redis.call('HGET', activeRunKey, 'nodeId')
+                if not ownerNodeId or ownerNodeId ~= nodeId then
+                    return 0
                 end
-                return 0
+                local currentRunId = redis.call('GET', bySessionKey)
+                if currentRunId and currentRunId ~= runId then
+                    return 0
+                end
+                redis.call('HSET', activeRunKey, 'heartbeatAt', heartbeatAt)
+                redis.call('PEXPIRE', activeRunKey, ttlMs)
+                redis.call('SET', bySessionKey, runId, 'PX', ttlMs)
+                redis.call('PEXPIRE', tenantActiveKey, ttlMs)
+                if userId ~= '' then
+                    redis.call('PEXPIRE', userActiveKey, ttlMs)
+                end
+                return 1
                 """;
         DefaultRedisScript<Long> script = new DefaultRedisScript<>();
         script.setScriptText(lua);
@@ -202,4 +225,3 @@ public class RunAdmissionController {
         return script;
     }
 }
-

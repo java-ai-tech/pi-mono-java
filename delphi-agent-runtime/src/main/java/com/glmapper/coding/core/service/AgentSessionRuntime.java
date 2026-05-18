@@ -140,7 +140,7 @@ public class AgentSessionRuntime {
                     holder[0] = buildAgentFromSession(saved, List.of());
                     return holder[0];
                 },
-                () -> holder[0].subscribe(event -> dispatchEvent(id, event))
+                () -> holder[0].subscribe(event -> dispatchEvent(ns2, id, event))
         );
 
         if (auditService != null) {
@@ -166,7 +166,7 @@ public class AgentSessionRuntime {
         // 触生命周期，确保会话不过期
         lifecycleManager.touch(sessionId, namespace);
         // 将prompt提交到队列中执行，确保同一会话的prompt按顺序执行且不会并发执行
-        return promptQueue.submit(sessionId, () -> {
+        return promptQueue.submit(sessionKey(namespace, sessionId), () -> {
             Agent agent = getOrCreateLiveAgent(sessionId);
             String runId = UUID.randomUUID().toString();
             lifecycleManager.setActiveRun(sessionId, namespace, runId);
@@ -193,7 +193,7 @@ public class AgentSessionRuntime {
     public CompletableFuture<Void> cont(String sessionId, String namespace) {
         validateNamespace(sessionId, namespace);
         lifecycleManager.touch(sessionId, namespace);
-        return promptQueue.submit(sessionId, () -> {
+        return promptQueue.submit(sessionKey(namespace, sessionId), () -> {
             Agent agent = getOrCreateLiveAgent(sessionId);
             String runId = UUID.randomUUID().toString();
             lifecycleManager.setActiveRun(sessionId, namespace, runId);
@@ -225,7 +225,7 @@ public class AgentSessionRuntime {
         validateNamespace(sessionId, namespace);
         lifecycleManager.touch(sessionId, namespace);
         getOrCreateLiveAgent(sessionId).abort();
-        promptQueue.cancel(sessionId);
+        promptQueue.cancel(sessionKey(namespace, sessionId));
 
         if (auditService != null) {
             auditService.record(namespace, null, sessionId, "abort", Map.of());
@@ -346,13 +346,14 @@ public class AgentSessionRuntime {
 
     public AutoCloseable subscribeEvents(String sessionId, String namespace, Consumer<AgentEvent> listener) {
         validateNamespace(sessionId, namespace);
-        eventListeners.computeIfAbsent(sessionId, ignored -> new CopyOnWriteArrayList<>()).add(listener);
+        String key = sessionKey(namespace, sessionId);
+        eventListeners.computeIfAbsent(key, ignored -> new CopyOnWriteArrayList<>()).add(listener);
         return () -> {
-            List<Consumer<AgentEvent>> listeners = eventListeners.get(sessionId);
+            List<Consumer<AgentEvent>> listeners = eventListeners.get(key);
             if (listeners != null) {
                 listeners.remove(listener);
                 if (listeners.isEmpty()) {
-                    eventListeners.remove(sessionId);
+                    eventListeners.remove(key);
                 }
             }
         };
@@ -479,7 +480,7 @@ public class AgentSessionRuntime {
                 forkId,
                 forkNs,
                 () -> agent,
-                () -> agent.subscribe(event -> dispatchEvent(forkId, event))
+                () -> agent.subscribe(event -> dispatchEvent(forkNs, forkId, event))
         );
 
         if (auditService != null) {
@@ -642,7 +643,7 @@ public class AgentSessionRuntime {
                     holder[0] = buildAgentFromSession(session, path);
                     return holder[0];
                 },
-                () -> holder[0].subscribe(event -> dispatchEvent(sessionId, event))
+                () -> holder[0].subscribe(event -> dispatchEvent(namespace, sessionId, event))
         );
     }
 
@@ -751,10 +752,10 @@ public class AgentSessionRuntime {
         return restoredMessages;
     }
 
-    private void dispatchEvent(String sessionId, AgentEvent event) {
+    private void dispatchEvent(String namespace, String sessionId, AgentEvent event) {
         extensionRuntime.onAgentEvent(sessionId, event);
 
-        List<Consumer<AgentEvent>> listeners = eventListeners.get(sessionId);
+        List<Consumer<AgentEvent>> listeners = eventListeners.get(sessionKey(namespace, sessionId));
         if (listeners == null) {
             return;
         }
@@ -764,6 +765,10 @@ public class AgentSessionRuntime {
             } catch (Exception ignored) {
             }
         }
+    }
+
+    private String sessionKey(String namespace, String sessionId) {
+        return (namespace == null ? "" : namespace) + ":" + sessionId;
     }
 
     private void persistConversation(String sessionId, List<AgentMessage> messages) {

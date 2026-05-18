@@ -4,6 +4,7 @@ import com.glmapper.agent.core.AgentAssistantMessage;
 import com.glmapper.agent.core.AgentEvent;
 import com.glmapper.ai.api.ContentBlock;
 import com.glmapper.ai.api.TextContent;
+import com.glmapper.coding.core.cluster.DistributedLiveRunRegistry;
 import com.glmapper.coding.core.execution.WorkspaceStorage;
 import com.glmapper.coding.core.runtime.subagent.SubagentRuntime;
 import com.glmapper.coding.core.service.AgentSessionRuntime;
@@ -118,8 +119,14 @@ public class AgentRunRuntime {
             case RUN_NOW -> scheduleRun(context, sink);
             // 如果有活跃运行，且策略为中断并执行，则先中断当前运行，再调度执行
             case INTERRUPT -> {
+                tenantRuntimeGuard.ensureQueueCapacity(context, runQueueManager);
+                int queueSize = runQueueManager.enqueue(context, sink);
+                eventPublisher.emit(sink, context, "queue_updated", Map.of(
+                        "runId", context.runId(),
+                        "decision", decision.type().name(),
+                        "queueSize", queueSize
+                ));
                 active.ifPresent(r -> r.abort("interrupted_by_new_run"));
-                scheduleRun(context, sink);
             }
             // 如果有活跃运行，且策略为排队等待，则将新的运行加入队列，等待前一个运行完成后再执行
             case ENQUEUE -> {
@@ -166,7 +173,12 @@ public class AgentRunRuntime {
      */
     private void scheduleRun(AgentRunContext context, RuntimeEventSink sink) {
         tenantRuntimeGuard.ensureCanStartRun(context, liveRunRegistry);
-        CompletableFuture.runAsync(() -> executeRun(context, sink), runExecutor);
+        CompletableFuture.runAsync(() -> executeRun(context, sink, null), runExecutor);
+    }
+
+    private void scheduleRun(AgentRunContext context, RuntimeEventSink sink, RunQueueManager.PolledRun polledRun) {
+        tenantRuntimeGuard.ensureCanStartRun(context, liveRunRegistry);
+        CompletableFuture.runAsync(() -> executeRun(context, sink, polledRun), runExecutor);
     }
 
     /**
@@ -182,12 +194,12 @@ public class AgentRunRuntime {
      * @param context
      * @param sink
      */
-    private void executeRun(AgentRunContext context, RuntimeEventSink sink) {
+    private void executeRun(AgentRunContext context, RuntimeEventSink sink, RunQueueManager.PolledRun polledRun) {
         AtomicInteger lastAssistantTextLength = new AtomicInteger(0);
         AutoCloseable subscription = null;
+        boolean registered = false;
+        boolean polledAcked = false;
         try {
-            workspaceStorage.prepareForRun(context.namespace(), context.sessionId());
-
             LiveRunRegistry.ActiveRun activeRun = new LiveRunRegistry.ActiveRun(
                     context.runId(),
                     context.namespace(),
@@ -205,6 +217,13 @@ public class AgentRunRuntime {
                     text -> sessionRuntime.steer(context.sessionId(), context.namespace(), text)
             );
             liveRunRegistry.register(activeRun);
+            registered = true;
+            if (polledRun != null) {
+                runQueueManager.ack(context.namespace(), context.sessionId(), polledRun);
+                polledAcked = true;
+            }
+
+            workspaceStorage.prepareForRun(context.namespace(), context.sessionId());
 
             eventPublisher.emit(sink, context, "run_started", Map.of(
                     "runId", context.runId(),
@@ -231,13 +250,24 @@ public class AgentRunRuntime {
         } catch (CompletionException completionException) {
             Throwable root = completionException.getCause() == null ? completionException : completionException.getCause();
             handleRunError(context, sink, root);
+        } catch (DistributedLiveRunRegistry.AdmissionRejectedException admissionRejectedException) {
+            if (polledRun != null && !polledAcked && isSessionBusy(admissionRejectedException)) {
+                runQueueManager.requeue(context.namespace(), context.sessionId(), polledRun);
+                return;
+            }
+            if (polledRun != null && !polledAcked) {
+                runQueueManager.ack(context.namespace(), context.sessionId(), polledRun);
+            }
+            handleRunError(context, sink, admissionRejectedException);
         } catch (Exception e) {
             handleRunError(context, sink, e);
         } finally {
             closeQuietly(subscription);
-            liveRunRegistry.complete(context.runId());
-            persistWorkspaceAsync(context);
-            scheduleNextQueuedRun(context.namespace(), context.sessionId());
+            if (registered) {
+                liveRunRegistry.complete(context.runId());
+                persistWorkspaceAsync(context);
+                scheduleNextQueuedRun(context.namespace(), context.sessionId());
+            }
         }
     }
 
@@ -256,8 +286,7 @@ public class AgentRunRuntime {
     private void scheduleNextQueuedRun(String namespace, String sessionId) {
         runQueueManager.pollNext(namespace, sessionId).ifPresent(polled -> {
             try {
-                scheduleRun(polled.context(), polled.sink());
-                runQueueManager.ack(namespace, sessionId, polled);
+                scheduleRun(polled.context(), polled.sink(), polled);
             } catch (TenantRuntimeGuard.QuotaRejectedException quotaRejectedException) {
                 runQueueManager.ack(namespace, sessionId, polled);
                 emitQuotaRejected(polled.context(), polled.sink(), quotaRejectedException.getMessage());
@@ -267,6 +296,11 @@ public class AgentRunRuntime {
                 throw other;
             }
         });
+    }
+
+    private boolean isSessionBusy(Throwable error) {
+        return error != null && error.getMessage() != null
+                && error.getMessage().contains("session already has active run");
     }
 
     private void handleRunError(AgentRunContext context, RuntimeEventSink sink, Throwable error) {
