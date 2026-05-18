@@ -1,11 +1,14 @@
 package com.glmapper.coding.core.runtime.subagent;
 
+import com.glmapper.coding.core.cluster.ClusterNodeIdentity;
+import com.glmapper.coding.core.cluster.SubagentCommandDispatcher;
 import com.glmapper.coding.core.runtime.AgentRunContext;
 import com.glmapper.coding.core.runtime.LiveRunRegistry;
 import com.glmapper.coding.core.runtime.RuntimeAuditService;
 import com.glmapper.coding.core.runtime.RuntimeEventPublisher;
 import com.glmapper.coding.core.runtime.RuntimeEventSink;
 import jakarta.annotation.PreDestroy;
+import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.stereotype.Component;
 
 import java.time.Instant;
@@ -47,19 +50,25 @@ public class SubagentRuntime {
      * watcherExecutor 用于异步处理子Agent完成后的回调，确保这些回调不会阻塞主线程，并且能够高效地处理大量子Agent的完成事件。
      */
     private final ExecutorService watcherExecutor = Executors.newVirtualThreadPerTaskExecutor();
+    private final ObjectProvider<ClusterNodeIdentity> nodeIdentityProvider;
+    private final ObjectProvider<SubagentCommandDispatcher> commandDispatcherProvider;
 
     public SubagentRuntime(LiveRunRegistry liveRunRegistry,
                            SubagentRegistry subagentRegistry,
                            SubagentQuotaGuard subagentQuotaGuard,
                            SubagentRunner subagentRunner,
                            RuntimeEventPublisher runtimeEventPublisher,
-                           RuntimeAuditService runtimeAuditService) {
+                           RuntimeAuditService runtimeAuditService,
+                           ObjectProvider<ClusterNodeIdentity> nodeIdentityProvider,
+                           ObjectProvider<SubagentCommandDispatcher> commandDispatcherProvider) {
         this.liveRunRegistry = liveRunRegistry;
         this.subagentRegistry = subagentRegistry;
         this.subagentQuotaGuard = subagentQuotaGuard;
         this.subagentRunner = subagentRunner;
         this.runtimeEventPublisher = runtimeEventPublisher;
         this.runtimeAuditService = runtimeAuditService;
+        this.nodeIdentityProvider = nodeIdentityProvider;
+        this.commandDispatcherProvider = commandDispatcherProvider;
     }
 
     /**
@@ -161,6 +170,7 @@ public class SubagentRuntime {
 
     public boolean abort(String subagentId, String reason) {
         Optional<SubagentContext> context = subagentRegistry.context(subagentId);
+        // Try local abort first
         boolean aborted = subagentRegistry.abort(subagentId, reason);
         if (aborted && context.isPresent()) {
             LiveRunRegistry.ActiveRun activeRun = liveRunRegistry.findByRunId(context.get().parentRunId()).orElse(null);
@@ -173,8 +183,19 @@ public class SubagentRuntime {
                         Map.of("reason", reason == null ? "aborted" : reason, "status", SubagentStatus.ABORTED.name())
                 );
             }
+            return true;
         }
-        return aborted;
+        // Not local: try cross-node dispatch
+        SubagentCommandDispatcher dispatcher = commandDispatcherProvider.getIfAvailable();
+        ClusterNodeIdentity nodeIdentity = nodeIdentityProvider.getIfAvailable();
+        if (dispatcher == null || nodeIdentity == null) {
+            return false;
+        }
+        Optional<String> ownerNodeId = subagentRegistry.ownerNodeId(subagentId);
+        if (ownerNodeId.isEmpty() || nodeIdentity.getNodeId().equals(ownerNodeId.get())) {
+            return false;
+        }
+        return dispatcher.sendAbort(ownerNodeId.get(), subagentId, reason);
     }
 
     public void abortByParentRun(String parentRunId, String reason) {

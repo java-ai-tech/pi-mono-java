@@ -8,14 +8,15 @@ import com.glmapper.coding.core.runtime.RunQueueDecision;
 import com.glmapper.coding.core.runtime.RunQueueDecisionType;
 import com.glmapper.coding.core.runtime.RunQueueManager;
 import com.glmapper.coding.core.runtime.RunQueueMode;
-import com.glmapper.coding.core.runtime.RuntimeEvent;
 import com.glmapper.coding.core.runtime.RuntimeEventSink;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.springframework.data.redis.core.ListOperations;
 import org.springframework.data.redis.core.StringRedisTemplate;
+import org.springframework.data.redis.core.script.RedisScript;
 
 import java.time.Instant;
+import java.util.List;
 import java.util.Map;
 import java.util.Optional;
 
@@ -31,6 +32,7 @@ class DistributedRunQueueManagerTest {
     private StringRedisTemplate redisTemplate;
     private ListOperations<String, String> listOps;
     private ClusterKeyRegistry keyRegistry;
+    private ClusterNodeIdentity nodeIdentity;
     private ObjectMapper objectMapper;
     private RuntimeEventSink globalSink;
     private DistributedRunQueueManager manager;
@@ -49,10 +51,11 @@ class DistributedRunQueueManagerTest {
                         null, null, 0)
         );
         keyRegistry = new ClusterKeyRegistry(props);
+        nodeIdentity = new ClusterNodeIdentity(props);
         objectMapper = new ObjectMapper().registerModule(new JavaTimeModule());
         globalSink = event -> { };
 
-        manager = new DistributedRunQueueManager(redisTemplate, keyRegistry, objectMapper, globalSink);
+        manager = new DistributedRunQueueManager(redisTemplate, keyRegistry, nodeIdentity, objectMapper, globalSink);
     }
 
     @Test
@@ -70,7 +73,7 @@ class DistributedRunQueueManagerTest {
     }
 
     @Test
-    void enqueueRpushesSerializedContext() {
+    void enqueueRpushesSerializedEnvelope() {
         AgentRunContext ctx = newContext("run1", RunQueueMode.FOLLOWUP);
         when(listOps.rightPush(eq("delphi:queue:session:ns:sess1"), any(String.class)))
                 .thenReturn(1L);
@@ -82,23 +85,11 @@ class DistributedRunQueueManagerTest {
     }
 
     @Test
-    void pollNextReturnsEmptyWhenQueueEmpty() {
-        when(listOps.leftPop("delphi:queue:session:ns:sess1")).thenReturn(null);
-        Optional<RunQueueManager.QueuedRun> result = manager.pollNext("ns", "sess1");
+    void pollNextReturnsEmptyWhenScriptReturnsNull() {
+        when(redisTemplate.execute(any(RedisScript.class), any(List.class), any(Object[].class)))
+                .thenReturn(null);
+        Optional<RunQueueManager.PolledRun> result = manager.pollNext("ns", "sess1");
         assertTrue(result.isEmpty());
-    }
-
-    @Test
-    void pollNextDeserializesContextAndAttachesGlobalSink() throws Exception {
-        AgentRunContext ctx = newContext("run1", RunQueueMode.FOLLOWUP);
-        String json = objectMapper.writeValueAsString(ctx);
-        when(listOps.leftPop("delphi:queue:session:ns:sess1")).thenReturn(json);
-
-        Optional<RunQueueManager.QueuedRun> result = manager.pollNext("ns", "sess1");
-
-        assertTrue(result.isPresent());
-        assertEquals("run1", result.get().context().runId());
-        assertSame(globalSink, result.get().sink());
     }
 
     @Test

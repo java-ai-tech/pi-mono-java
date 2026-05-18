@@ -254,11 +254,17 @@ public class AgentRunRuntime {
     }
 
     private void scheduleNextQueuedRun(String namespace, String sessionId) {
-        runQueueManager.pollNext(namespace, sessionId).ifPresent(queued -> {
+        runQueueManager.pollNext(namespace, sessionId).ifPresent(polled -> {
             try {
-                scheduleRun(queued.context(), queued.sink());
+                scheduleRun(polled.context(), polled.sink());
+                runQueueManager.ack(namespace, sessionId, polled);
             } catch (TenantRuntimeGuard.QuotaRejectedException quotaRejectedException) {
-                emitQuotaRejected(queued.context(), queued.sink(), quotaRejectedException.getMessage());
+                runQueueManager.ack(namespace, sessionId, polled);
+                emitQuotaRejected(polled.context(), polled.sink(), quotaRejectedException.getMessage());
+            } catch (Exception other) {
+                // unexpected failure during scheduling — requeue so we don't lose the run
+                runQueueManager.requeue(namespace, sessionId, polled);
+                throw other;
             }
         });
     }

@@ -3,17 +3,17 @@ package com.glmapper.coding.core.runtime;
 import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.stereotype.Component;
 
-import java.util.Objects;
+import java.util.Deque;
 import java.util.Optional;
-import java.util.Queue;
+import java.util.UUID;
 import java.util.concurrent.ConcurrentHashMap;
-import java.util.concurrent.ConcurrentLinkedQueue;
+import java.util.concurrent.ConcurrentLinkedDeque;
 
 @Component
 @ConditionalOnProperty(prefix = "pi.cluster", name = "enabled", havingValue = "false", matchIfMissing = true)
 public class LocalRunQueueManager implements RunQueueManager {
 
-    private final ConcurrentHashMap<String, Queue<QueuedRun>> queues = new ConcurrentHashMap<>();
+    private final ConcurrentHashMap<String, Deque<PolledRun>> queues = new ConcurrentHashMap<>();
 
     @Override
     public RunQueueDecision decide(AgentRunContext context, boolean hasActiveRun) {
@@ -33,19 +33,19 @@ public class LocalRunQueueManager implements RunQueueManager {
     @Override
     public int enqueue(AgentRunContext context, RuntimeEventSink sink) {
         String key = queueKey(context.namespace(), context.sessionId());
-        Queue<QueuedRun> queue = queues.computeIfAbsent(key, ignored -> new ConcurrentLinkedQueue<>());
-        queue.add(new QueuedRun(context, sink));
+        Deque<PolledRun> queue = queues.computeIfAbsent(key, ignored -> new ConcurrentLinkedDeque<>());
+        queue.addLast(new PolledRun(context, sink, UUID.randomUUID().toString()));
         return queue.size();
     }
 
     @Override
-    public Optional<QueuedRun> pollNext(String namespace, String sessionId) {
+    public Optional<PolledRun> pollNext(String namespace, String sessionId) {
         String key = queueKey(namespace, sessionId);
-        Queue<QueuedRun> queue = queues.get(key);
+        Deque<PolledRun> queue = queues.get(key);
         if (queue == null) {
             return Optional.empty();
         }
-        QueuedRun next = queue.poll();
+        PolledRun next = queue.pollFirst();
         if (queue.isEmpty()) {
             queues.remove(key, queue);
         }
@@ -53,8 +53,20 @@ public class LocalRunQueueManager implements RunQueueManager {
     }
 
     @Override
+    public void ack(String namespace, String sessionId, PolledRun polledRun) {
+        // Local implementation: ack is a no-op (already removed by pollNext)
+    }
+
+    @Override
+    public void requeue(String namespace, String sessionId, PolledRun polledRun) {
+        String key = queueKey(namespace, sessionId);
+        Deque<PolledRun> queue = queues.computeIfAbsent(key, ignored -> new ConcurrentLinkedDeque<>());
+        queue.addFirst(polledRun);
+    }
+
+    @Override
     public int queueSize(String namespace, String sessionId) {
-        Queue<QueuedRun> queue = queues.get(queueKey(namespace, sessionId));
+        Deque<PolledRun> queue = queues.get(queueKey(namespace, sessionId));
         return queue == null ? 0 : queue.size();
     }
 

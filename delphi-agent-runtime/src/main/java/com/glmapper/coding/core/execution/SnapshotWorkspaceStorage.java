@@ -42,6 +42,9 @@ import java.util.zip.GZIPOutputStream;
 public class SnapshotWorkspaceStorage implements WorkspaceStorage {
     private static final Logger log = LoggerFactory.getLogger(SnapshotWorkspaceStorage.class);
     private static final String SNAPSHOT_KEY_TEMPLATE = "workspaces/%s/%s/snapshot.tar.gz";
+    private static final long LOCK_WAIT_TIMEOUT_MS = 30_000L;
+    private static final long LOCK_POLL_INTERVAL_MS = 500L;
+    private static final java.time.Duration LOCK_TTL = java.time.Duration.ofMinutes(5);
 
     private final Path workspacesRoot;
     private final S3Client s3Client;
@@ -88,19 +91,14 @@ public class SnapshotWorkspaceStorage implements WorkspaceStorage {
 
         String lockKey = keyRegistry.getPrefix() + ":workspace:lock:" + namespace + ":" + sessionId;
         String lockValue = UUID.randomUUID().toString();
-        Boolean acquired = redisTemplate.opsForValue().setIfAbsent(
-                lockKey, lockValue, java.time.Duration.ofMinutes(5));
-        if (Boolean.FALSE.equals(acquired)) {
-            log.warn("Workspace recovery lock held by another node, skipping: ns={}, session={}", namespace, sessionId);
-            try {
-                Files.createDirectories(workspace);
-            } catch (IOException e) {
-                throw new RuntimeException("Failed to create workspace: " + workspace, e);
-            }
-            return;
+        if (!acquireLockWithWait(lockKey, lockValue)) {
+            throw new WorkspaceRecoveryException(
+                    "Failed to acquire workspace recovery lock within " + LOCK_WAIT_TIMEOUT_MS + "ms: ns="
+                            + namespace + ", session=" + sessionId);
         }
 
         try {
+            // After acquiring the lock, re-check whether another node has already restored
             if (Files.exists(workspace) && !isEmpty(workspace)) {
                 return;
             }
@@ -111,21 +109,44 @@ public class SnapshotWorkspaceStorage implements WorkspaceStorage {
                 extractTarGz(response, workspace);
                 log.info("Restored workspace from S3: ns={}, session={}, key={}", namespace, sessionId, s3Key);
             } catch (NoSuchKeyException e) {
-                // first run for this session, no snapshot exists
+                // first run for this session, no snapshot exists — empty workspace is correct
             } catch (Exception e) {
-                log.warn("Failed to restore workspace from S3: ns={}, session={}", namespace, sessionId, e);
+                // S3 restore failure must abort the run; do not silently continue with empty workspace
+                throw new WorkspaceRecoveryException(
+                        "Failed to restore workspace from S3: ns=" + namespace + ", session=" + sessionId, e);
             }
         } catch (IOException e) {
-            throw new RuntimeException("Failed to prepare workspace: " + workspace, e);
+            throw new WorkspaceRecoveryException("Failed to prepare workspace: " + workspace, e);
         } finally {
             releaseLock(lockKey, lockValue);
         }
+    }
+
+    private boolean acquireLockWithWait(String lockKey, String lockValue) {
+        long deadline = System.currentTimeMillis() + LOCK_WAIT_TIMEOUT_MS;
+        while (System.currentTimeMillis() < deadline) {
+            Boolean acquired = redisTemplate.opsForValue().setIfAbsent(lockKey, lockValue, LOCK_TTL);
+            if (Boolean.TRUE.equals(acquired)) {
+                return true;
+            }
+            try {
+                Thread.sleep(LOCK_POLL_INTERVAL_MS);
+            } catch (InterruptedException ie) {
+                Thread.currentThread().interrupt();
+                return false;
+            }
+        }
+        return false;
     }
 
     @Override
     public CompletableFuture<Void> persistAfterRun(String namespace, String sessionId) {
         Path workspace = resolveLocal(namespace, sessionId);
         if (!Files.exists(workspace)) {
+            return CompletableFuture.completedFuture(null);
+        }
+        if (isEffectivelyEmpty(workspace)) {
+            log.info("Skipping snapshot persist for empty workspace: ns={}, session={}", namespace, sessionId);
             return CompletableFuture.completedFuture(null);
         }
         return CompletableFuture.runAsync(() -> {
@@ -147,6 +168,23 @@ public class SnapshotWorkspaceStorage implements WorkspaceStorage {
                 }
             }
         }, persistExecutor);
+    }
+
+    /**
+     * Returns true if the workspace contains no files outside of the exclude list (e.g. only
+     * .skills/ subdirectory). Used to skip uploading useless empty snapshots that would
+     * otherwise overwrite valid snapshots.
+     */
+    private boolean isEffectivelyEmpty(Path workspace) {
+        try (var stream = Files.walk(workspace)) {
+            return stream
+                    .filter(p -> !p.equals(workspace))
+                    .filter(Files::isRegularFile)
+                    .noneMatch(p -> !isExcluded(workspace, p));
+        } catch (IOException e) {
+            // err on the side of persisting if we can't determine
+            return false;
+        }
     }
 
     @Override
@@ -250,6 +288,21 @@ public class SnapshotWorkspaceStorage implements WorkspaceStorage {
         }
         if (value.contains("..") || value.contains("/") || value.contains("\\") || value.contains("\0")) {
             throw new IllegalArgumentException("Invalid " + field + ": path traversal characters detected");
+        }
+    }
+
+    /**
+     * Thrown when workspace cannot be prepared for the run (lock contention timeout or S3 restore
+     * failure). Propagating this exception aborts the run rather than continuing with a broken
+     * workspace that would later overwrite valid snapshots.
+     */
+    public static class WorkspaceRecoveryException extends RuntimeException {
+        public WorkspaceRecoveryException(String message) {
+            super(message);
+        }
+
+        public WorkspaceRecoveryException(String message, Throwable cause) {
+            super(message, cause);
         }
     }
 }

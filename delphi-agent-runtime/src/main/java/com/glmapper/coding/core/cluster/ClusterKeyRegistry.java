@@ -33,8 +33,20 @@ public class ClusterKeyRegistry {
         return prefix + ":queue:session:" + namespace + ":" + sessionId;
     }
 
+    public String runQueueProcessingKey(String namespace, String sessionId) {
+        return prefix + ":queue:processing:" + namespace + ":" + sessionId;
+    }
+
+    public String runQueueRecoveryLockKey() {
+        return prefix + ":queue:recovery:lock";
+    }
+
     public String runCommandsKey(String nodeId) {
         return prefix + ":run:commands:" + nodeId;
+    }
+
+    public String subagentCommandsKey(String nodeId) {
+        return prefix + ":subagent:commands:" + nodeId;
     }
 
     public String sseEventsChannel() {
