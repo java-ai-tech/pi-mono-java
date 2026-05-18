@@ -26,7 +26,7 @@ class SkillsResolverTest {
         Files.writeString(nsSkill, "# Private Tool\nTenant-a only", StandardCharsets.UTF_8);
 
         ResourceCatalogService catalog = new ResourceCatalogService(skillsDir.toString(), "", "");
-        SkillsResolver resolver = new SkillsResolver(catalog);
+        SkillsResolver resolver = new SkillsResolver(catalog, 60);
 
         List<SkillInfo> skills = resolver.resolveSkills("tenant-a");
         assertEquals(2, skills.size());
@@ -41,7 +41,7 @@ class SkillsResolverTest {
         Files.writeString(nsSkillA, "# Secret\nTenant-a only", StandardCharsets.UTF_8);
 
         ResourceCatalogService catalog = new ResourceCatalogService(skillsDir.toString(), "", "");
-        SkillsResolver resolver = new SkillsResolver(catalog);
+        SkillsResolver resolver = new SkillsResolver(catalog, 60);
 
         List<SkillInfo> skillsB = resolver.resolveSkills("tenant-b");
         assertTrue(skillsB.isEmpty(), "tenant-b should not see tenant-a skills");
@@ -62,7 +62,7 @@ class SkillsResolverTest {
         Files.writeString(nsSkill, "# Deploy Custom\nCustom tenant-a deploy", StandardCharsets.UTF_8);
 
         ResourceCatalogService catalog = new ResourceCatalogService(skillsDir.toString(), "", "");
-        SkillsResolver resolver = new SkillsResolver(catalog);
+        SkillsResolver resolver = new SkillsResolver(catalog, 60);
 
         List<SkillInfo> skills = resolver.resolveSkills("tenant-a");
         assertEquals(2, skills.size());
@@ -82,7 +82,7 @@ class SkillsResolverTest {
         Files.writeString(publicSkill, "# Lint\nRun linter", StandardCharsets.UTF_8);
 
         ResourceCatalogService catalog = new ResourceCatalogService(skillsDir.toString(), "", "");
-        SkillsResolver resolver = new SkillsResolver(catalog);
+        SkillsResolver resolver = new SkillsResolver(catalog, 60);
 
         Optional<SkillInfo> found = resolver.resolveSkill("any-tenant", "lint");
         assertTrue(found.isPresent());
@@ -99,7 +99,7 @@ class SkillsResolverTest {
         Files.writeString(publicSkill, "# Tool\nV1", StandardCharsets.UTF_8);
 
         ResourceCatalogService catalog = new ResourceCatalogService(skillsDir.toString(), "", "");
-        SkillsResolver resolver = new SkillsResolver(catalog);
+        SkillsResolver resolver = new SkillsResolver(catalog, 60);
 
         List<SkillInfo> v1 = resolver.resolveSkills("tenant-a");
         assertEquals(1, v1.size());
