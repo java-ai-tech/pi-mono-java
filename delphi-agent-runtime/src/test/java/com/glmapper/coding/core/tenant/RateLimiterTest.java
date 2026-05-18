@@ -13,7 +13,7 @@ class RateLimiterTest {
         return new PiAgentProperties(
                 List.of(), null, null, null, null, List.of(),
                 new PiAgentProperties.RateLimitConfig(true, rpm),
-                null, null, null
+                null, null, null, null
         );
     }
 
@@ -49,7 +49,7 @@ class RateLimiterTest {
         PiAgentProperties props = new PiAgentProperties(
                 List.of(), null, null, null, null, List.of(),
                 new PiAgentProperties.RateLimitConfig(false, 1),
-                null, null, null
+                null, null, null, null
         );
         RateLimiter limiter = new RateLimiter(props);
         for (int i = 0; i < 100; i++) {
@@ -61,7 +61,7 @@ class RateLimiterTest {
     void nullRateLimitConfigAlwaysAllows() {
         PiAgentProperties props = new PiAgentProperties(
                 List.of(), null, null, null, null, List.of(),
-                null, null, null, null
+                null, null, null, null, null
         );
         RateLimiter limiter = new RateLimiter(props);
         assertTrue(limiter.tryAcquire("test-ns"));
