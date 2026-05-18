@@ -57,6 +57,14 @@ public class ClusterKeyRegistry {
         return prefix + ":node:registry:" + nodeId;
     }
 
+    public String tenantActiveCountKey(String namespace) {
+        return prefix + ":run:tenant-active:" + namespace;
+    }
+
+    public String userActiveCountKey(String namespace, String userId) {
+        return prefix + ":run:user-active:" + namespace + ":" + userId;
+    }
+
     private String resolvePrefix(PiAgentProperties properties) {
         if (properties.cluster() == null || properties.cluster().redis() == null) {
             return DEFAULT_PREFIX;

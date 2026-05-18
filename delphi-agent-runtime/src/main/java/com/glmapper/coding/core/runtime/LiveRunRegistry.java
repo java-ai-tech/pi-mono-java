@@ -1,94 +1,34 @@
 package com.glmapper.coding.core.runtime;
 
-import org.springframework.stereotype.Component;
-
-import java.util.Map;
 import java.util.Optional;
-import java.util.concurrent.ConcurrentHashMap;
-import java.util.function.Consumer;
 
-/**
- * 注册和管理当前活跃的Agent运行实例，支持通过会话ID或运行ID查询，提供中止和引导功能。
- *
- * @Classname LiveRunRegistry
- * @author glmapper
- */
-@Component
-public class LiveRunRegistry {
+public interface LiveRunRegistry {
 
-    private final Map<String, ActiveRun> activeBySession = new ConcurrentHashMap<>();
-    private final Map<String, ActiveRun> activeByRunId = new ConcurrentHashMap<>();
+    void register(ActiveRun run);
 
-    public Optional<ActiveRun> findBySession(String namespace, String sessionId) {
-        return Optional.ofNullable(activeBySession.get(sessionKey(namespace, sessionId)));
-    }
+    void complete(String runId);
 
-    public Optional<ActiveRun> findByRunId(String runId) {
-        return Optional.ofNullable(activeByRunId.get(runId));
-    }
+    Optional<ActiveRun> findBySession(String namespace, String sessionId);
 
-    public int activeCountByTenant(String tenantId) {
-        if (tenantId == null || tenantId.isBlank()) {
-            return 0;
-        }
-        return (int) activeByRunId.values().stream()
-                .filter(run -> tenantId.equals(run.tenantId()))
-                .count();
-    }
+    Optional<ActiveRun> findByRunId(String runId);
 
-    public int activeCountByUser(String tenantId, String userId) {
-        if (tenantId == null || tenantId.isBlank() || userId == null || userId.isBlank()) {
-            return 0;
-        }
-        return (int) activeByRunId.values().stream()
-                .filter(run -> tenantId.equals(run.tenantId()) && userId.equals(run.userId()))
-                .count();
-    }
+    int activeCountByTenant(String tenantId);
 
-    public void register(ActiveRun run) {
-        String key = sessionKey(run.namespace(), run.sessionId());
-        activeBySession.put(key, run);
-        activeByRunId.put(run.runId(), run);
-    }
+    int activeCountByUser(String tenantId, String userId);
 
-    public void complete(String runId) {
-        ActiveRun run = activeByRunId.remove(runId);
-        if (run != null) {
-            activeBySession.remove(sessionKey(run.namespace(), run.sessionId()), run);
-        }
-    }
+    boolean abortSession(String namespace, String sessionId, String reason);
 
-    public boolean abortSession(String namespace, String sessionId, String reason) {
-        ActiveRun run = activeBySession.get(sessionKey(namespace, sessionId));
-        if (run == null) {
-            return false;
-        }
-        run.abort(reason);
-        return true;
-    }
+    boolean steerSession(String namespace, String sessionId, String text);
 
-    public boolean steerSession(String namespace, String sessionId, String text) {
-        ActiveRun run = activeBySession.get(sessionKey(namespace, sessionId));
-        if (run == null) {
-            return false;
-        }
-        run.steer(text);
-        return true;
-    }
-
-    private String sessionKey(String namespace, String sessionId) {
-        return namespace + ":" + sessionId;
-    }
-
-    public record ActiveRun(String runId,
-                            String namespace,
-                            String sessionId,
-                            String tenantId,
-                            String userId,
-                            AgentRunContext context,
-                            RuntimeEventSink sink,
-                            RunAbortController abortController,
-                            Consumer<String> steerHandler) {
+    record ActiveRun(String runId,
+                     String namespace,
+                     String sessionId,
+                     String tenantId,
+                     String userId,
+                     AgentRunContext context,
+                     RuntimeEventSink sink,
+                     RunAbortController abortController,
+                     java.util.function.Consumer<String> steerHandler) {
 
         public void abort(String reason) {
             if (abortController != null) {
