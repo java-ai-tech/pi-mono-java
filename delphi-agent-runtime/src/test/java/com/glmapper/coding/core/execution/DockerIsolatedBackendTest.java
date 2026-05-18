@@ -12,7 +12,7 @@ class DockerIsolatedBackendTest {
 
     private DockerIsolatedBackend createBackend(Path workspacesRoot) {
         return new DockerIsolatedBackend(
-                workspacesRoot.toString(),
+                new LocalWorkspaceStorage(workspacesRoot.toString()),
                 "ubuntu:22.04",
                 50000L,
                 "256m",

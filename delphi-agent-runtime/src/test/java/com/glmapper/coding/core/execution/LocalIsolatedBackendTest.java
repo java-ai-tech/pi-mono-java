@@ -13,7 +13,7 @@ class LocalIsolatedBackendTest {
 
     @Test
     void shouldRejectPathTraversalInSessionId(@TempDir Path workspacesRoot) {
-        LocalIsolatedBackend backend = new LocalIsolatedBackend(workspacesRoot.toString());
+        LocalIsolatedBackend backend = new LocalIsolatedBackend(new LocalWorkspaceStorage(workspacesRoot.toString()));
         ExecutionContext context = new ExecutionContext("tenant-a", "../escape", null);
         assertThrows(IllegalArgumentException.class, () ->
                 backend.execute(context, "echo hello", ExecutionOptions.defaults()));
@@ -21,7 +21,7 @@ class LocalIsolatedBackendTest {
 
     @Test
     void shouldRejectPathTraversalInNamespace(@TempDir Path workspacesRoot) {
-        LocalIsolatedBackend backend = new LocalIsolatedBackend(workspacesRoot.toString());
+        LocalIsolatedBackend backend = new LocalIsolatedBackend(new LocalWorkspaceStorage(workspacesRoot.toString()));
         ExecutionContext context = new ExecutionContext("../escape", "s-1", null);
         assertThrows(IllegalArgumentException.class, () ->
                 backend.execute(context, "echo hello", ExecutionOptions.defaults()));
@@ -29,7 +29,7 @@ class LocalIsolatedBackendTest {
 
     @Test
     void shouldRejectSlashInSessionId(@TempDir Path workspacesRoot) {
-        LocalIsolatedBackend backend = new LocalIsolatedBackend(workspacesRoot.toString());
+        LocalIsolatedBackend backend = new LocalIsolatedBackend(new LocalWorkspaceStorage(workspacesRoot.toString()));
         ExecutionContext context = new ExecutionContext("tenant-a", "foo/bar", null);
         assertThrows(IllegalArgumentException.class, () ->
                 backend.execute(context, "echo hello", ExecutionOptions.defaults()));
@@ -37,7 +37,7 @@ class LocalIsolatedBackendTest {
 
     @Test
     void shouldRejectNullByteInNamespace(@TempDir Path workspacesRoot) {
-        LocalIsolatedBackend backend = new LocalIsolatedBackend(workspacesRoot.toString());
+        LocalIsolatedBackend backend = new LocalIsolatedBackend(new LocalWorkspaceStorage(workspacesRoot.toString()));
         ExecutionContext context = new ExecutionContext("tenant\0a", "s-1", null);
         assertThrows(IllegalArgumentException.class, () ->
                 backend.execute(context, "echo hello", ExecutionOptions.defaults()));
@@ -45,7 +45,7 @@ class LocalIsolatedBackendTest {
 
     @Test
     void shouldExecuteCommandInWorkspace(@TempDir Path workspacesRoot) {
-        LocalIsolatedBackend backend = new LocalIsolatedBackend(workspacesRoot.toString());
+        LocalIsolatedBackend backend = new LocalIsolatedBackend(new LocalWorkspaceStorage(workspacesRoot.toString()));
         ExecutionContext context = new ExecutionContext("tenant-a", "s-1", null);
         ExecutionResult result = backend.execute(context, "echo hello", ExecutionOptions.defaults());
         assertEquals(0, result.exitCode());
@@ -54,7 +54,7 @@ class LocalIsolatedBackendTest {
 
     @Test
     void shouldIsolateWorkspacePerNamespaceAndSession(@TempDir Path workspacesRoot) throws Exception {
-        LocalIsolatedBackend backend = new LocalIsolatedBackend(workspacesRoot.toString());
+        LocalIsolatedBackend backend = new LocalIsolatedBackend(new LocalWorkspaceStorage(workspacesRoot.toString()));
 
         // Write a file in tenant-a/s-1
         ExecutionContext ctxA = new ExecutionContext("tenant-a", "s-1", null);
@@ -71,7 +71,7 @@ class LocalIsolatedBackendTest {
 
     @Test
     void readFileShouldRejectPathTraversal(@TempDir Path workspacesRoot) throws Exception {
-        LocalIsolatedBackend backend = new LocalIsolatedBackend(workspacesRoot.toString());
+        LocalIsolatedBackend backend = new LocalIsolatedBackend(new LocalWorkspaceStorage(workspacesRoot.toString()));
         ExecutionContext context = new ExecutionContext("tenant-a", "s-1", null);
         // Create workspace so readFile doesn't fail on missing dir
         backend.execute(context, "echo init", ExecutionOptions.defaults());

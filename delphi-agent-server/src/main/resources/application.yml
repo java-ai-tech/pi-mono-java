@@ -32,6 +32,21 @@ pi:
     skills-dirs: ${PI_AGENT_SKILLS_DIRS:./skills,${user.home}/.codex/skills}
     prompts-dirs: ${PI_AGENT_PROMPTS_DIRS:./prompts}
     resources-dirs: ${PI_AGENT_RESOURCES_DIRS:./resources}
+  execution:
+    workspaces-root: ${PI_WORKSPACES_ROOT:workspaces}
+    workspace-storage:
+      # local（默认）：纯本地，单机或 owner 节点稳定的可信集群
+      # snapshot：本地热路径 + S3 兼容对象存储冷快照，节点宕机/迁移时从快照恢复
+      type: ${PI_WORKSPACE_STORAGE:local}
+      snapshot:
+        bucket: ${PI_WORKSPACE_BUCKET:}
+        endpoint: ${PI_WORKSPACE_S3_ENDPOINT:}
+        region: ${PI_WORKSPACE_S3_REGION:us-east-1}
+        access-key: ${PI_WORKSPACE_S3_AK:}
+        secret-key: ${PI_WORKSPACE_S3_SK:}
+        path-style: ${PI_WORKSPACE_S3_PATH_STYLE:true}
+        # 跳过快照的子路径（节省体积），逗号分隔
+        exclude: ${PI_WORKSPACE_SNAPSHOT_EXCLUDE:.skills/,node_modules/,.git/,target/,build/,dist/}
   models:
     - id: deepseek-v4-pro
       name: deepseek-v4-pro

@@ -4,6 +4,7 @@ import com.glmapper.agent.core.AgentAssistantMessage;
 import com.glmapper.agent.core.AgentEvent;
 import com.glmapper.ai.api.ContentBlock;
 import com.glmapper.ai.api.TextContent;
+import com.glmapper.coding.core.execution.WorkspaceStorage;
 import com.glmapper.coding.core.runtime.subagent.SubagentRuntime;
 import com.glmapper.coding.core.service.AgentSessionRuntime;
 import jakarta.annotation.PreDestroy;
@@ -31,6 +32,7 @@ public class AgentRunRuntime {
     private final RuntimeEventPublisher eventPublisher;
     private final RuntimeAuditService runtimeAuditService;
     private final RunFailureClassifier runFailureClassifier;
+    private final WorkspaceStorage workspaceStorage;
     private final ExecutorService runExecutor = Executors.newVirtualThreadPerTaskExecutor();
 
     @Autowired(required = false)
@@ -42,7 +44,8 @@ public class AgentRunRuntime {
                            RunQueueManager runQueueManager,
                            RuntimeEventPublisher eventPublisher,
                            RuntimeAuditService runtimeAuditService,
-                           RunFailureClassifier runFailureClassifier) {
+                           RunFailureClassifier runFailureClassifier,
+                           WorkspaceStorage workspaceStorage) {
         this.sessionRuntime = sessionRuntime;
         this.tenantRuntimeGuard = tenantRuntimeGuard;
         this.liveRunRegistry = liveRunRegistry;
@@ -50,6 +53,7 @@ public class AgentRunRuntime {
         this.eventPublisher = eventPublisher;
         this.runtimeAuditService = runtimeAuditService;
         this.runFailureClassifier = runFailureClassifier;
+        this.workspaceStorage = workspaceStorage;
     }
 
     public void stream(AgentRunRequest request, RuntimeEventSink sink) {
@@ -182,6 +186,8 @@ public class AgentRunRuntime {
         AtomicInteger lastAssistantTextLength = new AtomicInteger(0);
         AutoCloseable subscription = null;
         try {
+            workspaceStorage.prepareForRun(context.namespace(), context.sessionId());
+
             LiveRunRegistry.ActiveRun activeRun = new LiveRunRegistry.ActiveRun(
                     context.runId(),
                     context.namespace(),
@@ -230,7 +236,20 @@ public class AgentRunRuntime {
         } finally {
             closeQuietly(subscription);
             liveRunRegistry.complete(context.runId());
+            persistWorkspaceAsync(context);
             scheduleNextQueuedRun(context.namespace(), context.sessionId());
+        }
+    }
+
+    private void persistWorkspaceAsync(AgentRunContext context) {
+        try {
+            workspaceStorage.persistAfterRun(context.namespace(), context.sessionId())
+                    .exceptionally(error -> {
+                        // persist failure should not affect run completion; just log
+                        return null;
+                    });
+        } catch (Exception ignored) {
+            // never propagate persist errors back to run completion
         }
     }
 
