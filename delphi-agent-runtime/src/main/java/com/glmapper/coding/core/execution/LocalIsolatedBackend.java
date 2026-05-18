@@ -2,7 +2,6 @@ package com.glmapper.coding.core.execution;
 
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.context.annotation.Profile;
 import org.springframework.stereotype.Component;
 
@@ -12,7 +11,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.concurrent.TimeUnit;
 
 @Component
@@ -20,17 +18,10 @@ import java.util.concurrent.TimeUnit;
 public class LocalIsolatedBackend implements ExecutionBackend {
     private static final Logger log = LoggerFactory.getLogger(LocalIsolatedBackend.class);
 
-    private final Path workspacesRoot;
+    private final WorkspaceStorage workspaceStorage;
 
-    public LocalIsolatedBackend(
-            @Value("${pi.execution.workspaces-root:${PI_WORKSPACES_ROOT:workspaces}}") String workspacesRoot
-    ) {
-        this.workspacesRoot = Paths.get(workspacesRoot).toAbsolutePath();
-        try {
-            Files.createDirectories(this.workspacesRoot);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create workspaces root: " + this.workspacesRoot, e);
-        }
+    public LocalIsolatedBackend(WorkspaceStorage workspaceStorage) {
+        this.workspaceStorage = workspaceStorage;
     }
 
     @Override
@@ -104,23 +95,12 @@ public class LocalIsolatedBackend implements ExecutionBackend {
 
     @Override
     public Path getWorkspacePath(String namespace, String sessionId) {
-        validatePathSegment("namespace", namespace);
-        validatePathSegment("sessionId", sessionId);
-        return workspacesRoot.resolve(namespace).resolve(sessionId);
+        return workspaceStorage.resolveLocal(namespace, sessionId);
     }
 
     @Override
     public void cleanupSession(String namespace, String sessionId) {
-        validatePathSegment("namespace", namespace);
-        validatePathSegment("sessionId", sessionId);
-        Path workspace = getWorkspacePath(namespace, sessionId);
-        try {
-            if (Files.exists(workspace)) {
-                deleteRecursively(workspace);
-            }
-        } catch (IOException e) {
-            log.warn("Failed to cleanup workspace: {}", workspace, e);
-        }
+        workspaceStorage.cleanupLocal(namespace, sessionId);
     }
 
     private void validateContext(ExecutionContext context) {
@@ -130,33 +110,14 @@ public class LocalIsolatedBackend implements ExecutionBackend {
         if (context.sessionId() == null || context.sessionId().isBlank()) {
             throw new IllegalArgumentException("SessionId is required");
         }
-        // Prevent path traversal in namespace
-        validatePathSegment("namespace", context.namespace());
-        // Prevent path traversal in sessionId
-        validatePathSegment("sessionId", context.sessionId());
-    }
-
-    private void validatePathSegment(String field, String value) {
-        if (value.contains("..") || value.contains("/") || value.contains("\\")
-                || value.contains("\0")) {
-            throw new IllegalArgumentException("Invalid " + field + ": path traversal characters detected");
-        }
-        // After resolve, the workspace must still be under workspacesRoot
-        Path resolved = workspacesRoot.resolve(value).normalize();
-        if (!resolved.startsWith(workspacesRoot)) {
-            throw new IllegalArgumentException("Invalid " + field + ": escapes workspace root");
-        }
     }
 
     private Path resolveAndValidatePath(ExecutionContext context, String relativePath) {
         Path workspace = getWorkspacePath(context.namespace(), context.sessionId());
         Path resolved = workspace.resolve(relativePath).normalize();
-
-        // Ensure the resolved path is within the workspace
         if (!resolved.startsWith(workspace)) {
             throw new SecurityException("Path traversal detected: " + relativePath);
         }
-
         return resolved;
     }
 
@@ -173,20 +134,5 @@ public class LocalIsolatedBackend implements ExecutionBackend {
             }
         }
         return sb.toString();
-    }
-
-    private void deleteRecursively(Path path) throws IOException {
-        if (Files.isDirectory(path)) {
-            try (var stream = Files.list(path)) {
-                stream.forEach(child -> {
-                    try {
-                        deleteRecursively(child);
-                    } catch (IOException e) {
-                        throw new RuntimeException(e);
-                    }
-                });
-            }
-        }
-        Files.deleteIfExists(path);
     }
 }

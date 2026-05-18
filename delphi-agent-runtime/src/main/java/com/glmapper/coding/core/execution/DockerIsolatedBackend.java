@@ -16,7 +16,6 @@ import java.io.InputStreamReader;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
-import java.nio.file.Paths;
 import java.util.ArrayList;
 import java.util.List;
 import java.util.Map;
@@ -27,7 +26,7 @@ import java.util.concurrent.TimeUnit;
 public class DockerIsolatedBackend implements ExecutionBackend {
     private static final Logger log = LoggerFactory.getLogger(DockerIsolatedBackend.class);
 
-    private final Path workspacesRoot;
+    private final WorkspaceStorage workspaceStorage;
     private final String dockerImage;
     private final long cpuQuota;
     private final String memoryLimit;
@@ -38,38 +37,28 @@ public class DockerIsolatedBackend implements ExecutionBackend {
 
     @Autowired
     public DockerIsolatedBackend(
-            @Value("${pi.execution.workspaces-root:${PI_WORKSPACES_ROOT:./workspaces}}") String workspacesRoot,
+            WorkspaceStorage workspaceStorage,
             @Value("${pi.execution.docker.image:ubuntu:22.04}") String dockerImage,
             @Value("${pi.execution.docker.cpu-quota:50000}") long cpuQuota,
             @Value("${pi.execution.docker.memory-limit:256m}") String memoryLimit,
             @Value("${pi.execution.docker.pids-limit:100}") int pidsLimit
     ) {
-        this.workspacesRoot = Paths.get(workspacesRoot).toAbsolutePath();
+        this.workspaceStorage = workspaceStorage;
         this.dockerImage = dockerImage;
         this.cpuQuota = cpuQuota;
         this.memoryLimit = memoryLimit;
         this.pidsLimit = pidsLimit;
-        try {
-            Files.createDirectories(this.workspacesRoot);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create workspaces root: " + this.workspacesRoot, e);
-        }
         verifyDockerAvailable();
     }
 
     /** Package-private constructor for unit tests — skips Docker availability check. */
-    DockerIsolatedBackend(String workspacesRoot, String dockerImage, long cpuQuota, String memoryLimit, int pidsLimit,
-                          boolean skipDockerCheck) {
-        this.workspacesRoot = Paths.get(workspacesRoot).toAbsolutePath();
+    DockerIsolatedBackend(WorkspaceStorage workspaceStorage, String dockerImage, long cpuQuota,
+                          String memoryLimit, int pidsLimit, boolean skipDockerCheck) {
+        this.workspaceStorage = workspaceStorage;
         this.dockerImage = dockerImage;
         this.cpuQuota = cpuQuota;
         this.memoryLimit = memoryLimit;
         this.pidsLimit = pidsLimit;
-        try {
-            Files.createDirectories(this.workspacesRoot);
-        } catch (IOException e) {
-            throw new RuntimeException("Failed to create workspaces root: " + this.workspacesRoot, e);
-        }
         if (!skipDockerCheck) {
             verifyDockerAvailable();
         }
@@ -203,24 +192,12 @@ public class DockerIsolatedBackend implements ExecutionBackend {
 
     @Override
     public Path getWorkspacePath(String namespace, String sessionId) {
-        return workspacesRoot.resolve(namespace).resolve(sessionId);
+        return workspaceStorage.resolveLocal(namespace, sessionId);
     }
 
     @Override
     public void cleanupSession(String namespace, String sessionId) {
-        validatePathSegment("namespace", namespace);
-        validatePathSegment("sessionId", sessionId);
-        Path workspace = getWorkspacePath(namespace, sessionId);
-        try {
-            if (Files.exists(workspace)) {
-                try (var stream = Files.walk(workspace)) {
-                    stream.sorted(java.util.Comparator.reverseOrder())
-                            .forEach(p -> { try { Files.deleteIfExists(p); } catch (IOException ignored) {} });
-                }
-            }
-        } catch (IOException e) {
-            log.warn("Failed to cleanup workspace: {}", workspace, e);
-        }
+        workspaceStorage.cleanupLocal(namespace, sessionId);
     }
 
     private void validatePathSegment(String field, String value) {
