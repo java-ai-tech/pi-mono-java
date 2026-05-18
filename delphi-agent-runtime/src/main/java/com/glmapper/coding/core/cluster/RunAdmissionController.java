@@ -23,6 +23,7 @@ public class RunAdmissionController {
 
     private final DefaultRedisScript<Long> acquireScript;
     private final DefaultRedisScript<Long> releaseScript;
+    private final DefaultRedisScript<Long> renewScript;
 
     public RunAdmissionController(StringRedisTemplate redisTemplate,
                                   ClusterKeyRegistry keyRegistry,
@@ -34,6 +35,7 @@ public class RunAdmissionController {
         this.runTtlMs = properties.cluster().run().maxTtlMs();
         this.acquireScript = buildAcquireScript();
         this.releaseScript = buildReleaseScript();
+        this.renewScript = buildRenewScript();
     }
 
     public AdmissionResult acquire(AgentRunContext context, int maxTenantConcurrent, int maxUserConcurrent) {
@@ -80,8 +82,22 @@ public class RunAdmissionController {
         redisTemplate.execute(
                 releaseScript,
                 List.of(activeRunKey, bySessionKey, tenantActiveKey, userActiveKey),
-                runId
+                runId,
+                nodeIdentity.getNodeId()
         );
+    }
+
+    public boolean renew(String runId, String namespace, String sessionId) {
+        String activeRunKey = keyRegistry.activeRunKey(runId);
+        String bySessionKey = keyRegistry.runBySessionKey(namespace, sessionId);
+        String tenantActiveKey = keyRegistry.tenantActiveCountKey(namespace);
+
+        Long result = redisTemplate.execute(
+                renewScript,
+                List.of(activeRunKey, bySessionKey, tenantActiveKey),
+                String.valueOf(runTtlMs)
+        );
+        return result != null && result == 1L;
     }
 
     public enum AdmissionResult {
@@ -149,6 +165,11 @@ public class RunAdmissionController {
                 local tenantActiveKey = KEYS[3]
                 local userActiveKey = KEYS[4]
                 local runId = ARGV[1]
+                local nodeId = ARGV[2]
+                local ownerNodeId = redis.call('HGET', activeRunKey, 'nodeId')
+                if ownerNodeId and ownerNodeId ~= nodeId then
+                    return 0
+                end
                 redis.call('DEL', activeRunKey)
                 redis.call('DEL', bySessionKey)
                 redis.call('SREM', tenantActiveKey, runId)
@@ -160,4 +181,25 @@ public class RunAdmissionController {
         script.setResultType(Long.class);
         return script;
     }
+
+    private DefaultRedisScript<Long> buildRenewScript() {
+        String lua = """
+                local activeRunKey = KEYS[1]
+                local bySessionKey = KEYS[2]
+                local tenantActiveKey = KEYS[3]
+                local ttlMs = tonumber(ARGV[1])
+                if redis.call('EXISTS', activeRunKey) == 1 then
+                    redis.call('PEXPIRE', activeRunKey, ttlMs)
+                    redis.call('PEXPIRE', bySessionKey, ttlMs)
+                    redis.call('PEXPIRE', tenantActiveKey, ttlMs)
+                    return 1
+                end
+                return 0
+                """;
+        DefaultRedisScript<Long> script = new DefaultRedisScript<>();
+        script.setScriptText(lua);
+        script.setResultType(Long.class);
+        return script;
+    }
 }
+
