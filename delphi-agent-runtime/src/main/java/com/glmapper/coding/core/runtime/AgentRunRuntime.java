@@ -331,9 +331,12 @@ public class AgentRunRuntime {
                 : request.tenantId();
         RunQueueMode queueMode = request.queueMode() == null ? RunQueueMode.INTERRUPT : request.queueMode();
         Map<String, Object> metadata = request.metadata() == null ? Map.of() : request.metadata();
+        String runId = request.runId() == null || request.runId().isBlank()
+                ? "run_" + UUID.randomUUID().toString().replace("-", "")
+                : request.runId();
 
         return new AgentRunContext(
-                "run_" + UUID.randomUUID().toString().replace("-", ""),
+                runId,
                 tenantId,
                 namespace,
                 request.userId(),
