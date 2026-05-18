@@ -6,8 +6,6 @@ import java.util.List;
 
 public interface SubagentStateRepository extends MongoRepository<SubagentStateDocument, String> {
 
-    List<SubagentStateDocument> findByNamespaceAndParentRunId(String namespace, String parentRunId);
-
     List<SubagentStateDocument> findByParentRunId(String parentRunId);
 
     List<SubagentStateDocument> findByNamespaceAndSessionIdAndStatus(String namespace, String sessionId, String status);
