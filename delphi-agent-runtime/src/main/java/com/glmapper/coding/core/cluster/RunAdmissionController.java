@@ -42,7 +42,8 @@ public class RunAdmissionController {
         String activeRunKey = keyRegistry.activeRunKey(context.runId());
         String bySessionKey = keyRegistry.runBySessionKey(context.namespace(), context.sessionId());
         String tenantActiveKey = keyRegistry.tenantActiveCountKey(context.namespace());
-        String userActiveKey = keyRegistry.userActiveCountKey(context.namespace(), context.userId());
+        String userId = context.userId() == null ? "" : context.userId();
+        String userActiveKey = keyRegistry.userActiveCountKey(context.namespace(), userId);
 
         String nodeId = nodeIdentity.getNodeId();
         long ttlMs = runTtlMs;
@@ -54,7 +55,7 @@ public class RunAdmissionController {
                 context.namespace(),
                 context.sessionId(),
                 context.tenantId(),
-                context.userId() == null ? "" : context.userId(),
+                userId,
                 nodeId,
                 String.valueOf(maxTenantConcurrent),
                 String.valueOf(maxUserConcurrent),
@@ -125,15 +126,19 @@ public class RunAdmissionController {
                 local maxUser = tonumber(ARGV[8])
                 local ttlMs = tonumber(ARGV[9])
                 local startedAt = ARGV[10]
+                local nowMs = tonumber(startedAt)
+                local expiresAt = nowMs + ttlMs
                 if redis.call('EXISTS', bySessionKey) == 1 then
                     return 1
                 end
-                local tenantCount = redis.call('SCARD', tenantActiveKey)
+                redis.call('ZREMRANGEBYSCORE', tenantActiveKey, 0, nowMs)
+                local tenantCount = redis.call('ZCOUNT', tenantActiveKey, nowMs, '+inf')
                 if tenantCount >= maxTenant then
                     return 2
                 end
                 if userId ~= '' and maxUser > 0 then
-                    local userCount = redis.call('SCARD', userActiveKey)
+                    redis.call('ZREMRANGEBYSCORE', userActiveKey, 0, nowMs)
+                    local userCount = redis.call('ZCOUNT', userActiveKey, nowMs, '+inf')
                     if userCount >= maxUser then
                         return 3
                     end
@@ -149,11 +154,9 @@ public class RunAdmissionController {
                     'startedAt', startedAt)
                 redis.call('PEXPIRE', activeRunKey, ttlMs)
                 redis.call('SET', bySessionKey, runId, 'PX', ttlMs)
-                redis.call('SADD', tenantActiveKey, runId)
-                redis.call('PEXPIRE', tenantActiveKey, ttlMs)
+                redis.call('ZADD', tenantActiveKey, expiresAt, runId)
                 if userId ~= '' then
-                    redis.call('SADD', userActiveKey, runId)
-                    redis.call('PEXPIRE', userActiveKey, ttlMs)
+                    redis.call('ZADD', userActiveKey, expiresAt, runId)
                 end
                 return 0
                 """;
@@ -181,8 +184,8 @@ public class RunAdmissionController {
                 if redis.call('GET', bySessionKey) == runId then
                     redis.call('DEL', bySessionKey)
                 end
-                redis.call('SREM', tenantActiveKey, runId)
-                redis.call('SREM', userActiveKey, runId)
+                redis.call('ZREM', tenantActiveKey, runId)
+                redis.call('ZREM', userActiveKey, runId)
                 return 0
                 """;
         DefaultRedisScript<Long> script = new DefaultRedisScript<>();
@@ -202,6 +205,8 @@ public class RunAdmissionController {
                 local userId = ARGV[3]
                 local ttlMs = tonumber(ARGV[4])
                 local heartbeatAt = ARGV[5]
+                local nowMs = tonumber(heartbeatAt)
+                local expiresAt = nowMs + ttlMs
                 local ownerNodeId = redis.call('HGET', activeRunKey, 'nodeId')
                 if not ownerNodeId or ownerNodeId ~= nodeId then
                     return 0
@@ -213,9 +218,11 @@ public class RunAdmissionController {
                 redis.call('HSET', activeRunKey, 'heartbeatAt', heartbeatAt)
                 redis.call('PEXPIRE', activeRunKey, ttlMs)
                 redis.call('SET', bySessionKey, runId, 'PX', ttlMs)
-                redis.call('PEXPIRE', tenantActiveKey, ttlMs)
+                redis.call('ZREMRANGEBYSCORE', tenantActiveKey, 0, nowMs)
+                redis.call('ZADD', tenantActiveKey, expiresAt, runId)
                 if userId ~= '' then
-                    redis.call('PEXPIRE', userActiveKey, ttlMs)
+                    redis.call('ZREMRANGEBYSCORE', userActiveKey, 0, nowMs)
+                    redis.call('ZADD', userActiveKey, expiresAt, runId)
                 end
                 return 1
                 """;

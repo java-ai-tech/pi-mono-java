@@ -130,15 +130,13 @@ public class DistributedLiveRunRegistry implements LiveRunRegistry {
     @Override
     public int activeCountByTenant(String tenantId) {
         if (tenantId == null || tenantId.isBlank()) return 0;
-        Long size = redisTemplate.opsForSet().size(keyRegistry.tenantActiveCountKey(tenantId));
-        return size == null ? 0 : size.intValue();
+        return activeRunCount(keyRegistry.tenantActiveCountKey(tenantId));
     }
 
     @Override
     public int activeCountByUser(String tenantId, String userId) {
         if (tenantId == null || tenantId.isBlank() || userId == null || userId.isBlank()) return 0;
-        Long size = redisTemplate.opsForSet().size(keyRegistry.userActiveCountKey(tenantId, userId));
-        return size == null ? 0 : size.intValue();
+        return activeRunCount(keyRegistry.userActiveCountKey(tenantId, userId));
     }
 
     @Override
@@ -193,5 +191,12 @@ public class DistributedLiveRunRegistry implements LiveRunRegistry {
                         run.namespace(), run.sessionId(), run.runId(), e);
             }
         }
+    }
+
+    private int activeRunCount(String key) {
+        long nowMs = System.currentTimeMillis();
+        redisTemplate.opsForZSet().removeRangeByScore(key, 0, nowMs);
+        Long count = redisTemplate.opsForZSet().count(key, nowMs, Double.POSITIVE_INFINITY);
+        return count == null ? 0 : count.intValue();
     }
 }

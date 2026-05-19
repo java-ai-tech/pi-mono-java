@@ -8,7 +8,7 @@ import jakarta.annotation.PreDestroy;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.ObjectProvider;
-import org.springframework.data.mongodb.core.MongoTemplate;
+import org.springframework.data.mongodb.core.MongoOperations;
 import org.springframework.data.mongodb.core.query.Criteria;
 import org.springframework.data.mongodb.core.query.Query;
 import org.springframework.data.mongodb.core.query.Update;
@@ -19,6 +19,8 @@ import org.springframework.stereotype.Component;
 
 import java.time.LocalDate;
 import java.time.format.DateTimeFormatter;
+import java.time.format.DateTimeParseException;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
@@ -32,14 +34,14 @@ public class UsageMeteringService {
     private static final String[] METRICS = {"inputTokens", "outputTokens", "requests", "toolCalls"};
 
     private final ConcurrentHashMap<String, AtomicLongArray> localCache = new ConcurrentHashMap<>();
-    private final MongoTemplate mongoTemplate;
+    private final MongoOperations mongoTemplate;
     private final PiAgentProperties properties;
     private final StringRedisTemplate redisTemplate;
     private final ClusterKeyRegistry keyRegistry;
     private final boolean clusterEnabled;
     private final DefaultRedisScript<Long> getAndDeleteScript;
 
-    public UsageMeteringService(MongoTemplate mongoTemplate,
+    public UsageMeteringService(MongoOperations mongoTemplate,
                                 PiAgentProperties properties,
                                 ObjectProvider<StringRedisTemplate> redisTemplateProvider,
                                 ClusterKeyRegistry keyRegistry) {
@@ -128,49 +130,38 @@ public class UsageMeteringService {
     }
 
     private void flushFromRedis() {
-        LocalDate today = LocalDate.now();
-        String date = today.format(DATE_FMT);
-        String pattern = keyRegistry.getPrefix() + ":usage:" + date + ":*";
+        String pattern = keyRegistry.getPrefix() + ":usage:*";
         Set<String> keys = redisTemplate.keys(pattern);
         if (keys == null || keys.isEmpty()) return;
 
-        ConcurrentHashMap<String, long[]> namespaceDeltas = new ConcurrentHashMap<>();
+        Map<UsageBucket, long[]> namespaceDeltas = new HashMap<>();
         for (String key : keys) {
+            UsageKey usageKey = parseUsageKey(key);
+            if (usageKey == null) continue;
+
             Long value = redisTemplate.execute(getAndDeleteScript, List.of(key));
             if (value == null || value == 0) continue;
 
-            String[] parts = key.split(":");
-            if (parts.length < 5) continue;
-            String namespace = parts[parts.length - 2];
-            String metric = parts[parts.length - 1];
-            int idx = metricIndex(metric);
-            if (idx < 0) continue;
-
-            namespaceDeltas.computeIfAbsent(namespace, k -> new long[4])[idx] += value;
+            UsageBucket bucket = new UsageBucket(usageKey.date(), usageKey.namespace());
+            namespaceDeltas.computeIfAbsent(bucket, k -> new long[4])[usageKey.metricIndex()] += value;
         }
 
-        for (Map.Entry<String, long[]> entry : namespaceDeltas.entrySet()) {
-            String namespace = entry.getKey();
+        for (Map.Entry<UsageBucket, long[]> entry : namespaceDeltas.entrySet()) {
+            UsageBucket bucket = entry.getKey();
             long[] deltas = entry.getValue();
             if (deltas[0] == 0 && deltas[1] == 0 && deltas[2] == 0 && deltas[3] == 0) continue;
 
             try {
-                Query query = Query.query(
-                        Criteria.where("namespace").is(namespace).and("date").is(today));
-                Update update = new Update()
-                        .inc("totalInputTokens", deltas[0])
-                        .inc("totalOutputTokens", deltas[1])
-                        .inc("totalRequests", deltas[2])
-                        .inc("totalToolCalls", deltas[3]);
-                mongoTemplate.upsert(query, update, UsageMetricsDocument.class);
+                upsertUsage(bucket.namespace(), bucket.date(), deltas);
             } catch (Exception e) {
-                String date2 = today.format(DATE_FMT);
+                String date = bucket.date().format(DATE_FMT);
                 for (int i = 0; i < 4; i++) {
                     if (deltas[i] > 0) {
-                        incrRedis(namespace, date2, i, deltas[i]);
+                        incrRedis(bucket.namespace(), date, i, deltas[i]);
                     }
                 }
-                log.warn("Failed to flush usage metrics for namespace '{}', rolled back to Redis", namespace, e);
+                log.warn("Failed to flush usage metrics for namespace '{}', date '{}', rolled back to Redis",
+                        bucket.namespace(), bucket.date(), e);
             }
         }
     }
@@ -189,14 +180,7 @@ public class UsageMeteringService {
             if (input == 0 && output == 0 && requests == 0 && toolCalls == 0) continue;
 
             try {
-                Query query = Query.query(
-                        Criteria.where("namespace").is(namespace).and("date").is(today));
-                Update update = new Update()
-                        .inc("totalInputTokens", input)
-                        .inc("totalOutputTokens", output)
-                        .inc("totalRequests", requests)
-                        .inc("totalToolCalls", toolCalls);
-                mongoTemplate.upsert(query, update, UsageMetricsDocument.class);
+                upsertUsage(namespace, today, new long[]{input, output, requests, toolCalls});
             } catch (Exception e) {
                 counters.addAndGet(0, input);
                 counters.addAndGet(1, output);
@@ -224,6 +208,17 @@ public class UsageMeteringService {
         return mongoTemplate.findOne(query, UsageMetricsDocument.class);
     }
 
+    protected void upsertUsage(String namespace, LocalDate date, long[] deltas) {
+        Query query = Query.query(
+                Criteria.where("namespace").is(namespace).and("date").is(date));
+        Update update = new Update()
+                .inc("totalInputTokens", deltas[0])
+                .inc("totalOutputTokens", deltas[1])
+                .inc("totalRequests", deltas[2])
+                .inc("totalToolCalls", deltas[3]);
+        mongoTemplate.upsert(query, update, UsageMetricsDocument.class);
+    }
+
     private int metricIndex(String metric) {
         for (int i = 0; i < METRICS.length; i++) {
             if (METRICS[i].equals(metric)) return i;
@@ -231,8 +226,42 @@ public class UsageMeteringService {
         return -1;
     }
 
+    private UsageKey parseUsageKey(String key) {
+        String usagePrefix = keyRegistry.getPrefix() + ":usage:";
+        if (!key.startsWith(usagePrefix)) {
+            return null;
+        }
+
+        String payload = key.substring(usagePrefix.length());
+        int dateEnd = payload.indexOf(':');
+        int metricStart = payload.lastIndexOf(':');
+        if (dateEnd <= 0 || metricStart <= dateEnd + 1 || metricStart == payload.length() - 1) {
+            return null;
+        }
+
+        String datePart = payload.substring(0, dateEnd);
+        String namespace = payload.substring(dateEnd + 1, metricStart);
+        String metric = payload.substring(metricStart + 1);
+        int metricIndex = metricIndex(metric);
+        if (metricIndex < 0) {
+            return null;
+        }
+
+        try {
+            return new UsageKey(LocalDate.parse(datePart, DATE_FMT), namespace, metricIndex);
+        } catch (DateTimeParseException e) {
+            return null;
+        }
+    }
+
     private boolean isEnabled() {
         return properties.metering() != null && properties.metering().enabled();
+    }
+
+    private record UsageBucket(LocalDate date, String namespace) {
+    }
+
+    private record UsageKey(LocalDate date, String namespace, int metricIndex) {
     }
 
     private DefaultRedisScript<Long> buildGetAndDeleteScript() {
